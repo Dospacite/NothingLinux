@@ -1,0 +1,25 @@
+[package]
+name = "nothing-linux"
+description = "Unofficial Nothing Ear desktop controller for Linux"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[[bin]]
+name = "nothing-linux"
+path = "src/main.rs"
+
+[dependencies]
+adw.workspace = true
+bluer.workspace = true
+gtk.workspace = true
+ksni.workspace = true
+nothing-core = { path = "../core" }
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[lints]
+workspace = true

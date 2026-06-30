@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.nothinglinux.nothinglinux</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>Nothing Linux</name>
+  <summary>Control Nothing Ear earbuds locally</summary>
+  <developer id="io.github.nothinglinux"><name>Nothing Linux contributors</name></developer>
+  <url type="homepage">https://github.com/Dospacite/NothingLinux</url>
+  <description>
+    <p>Nothing Linux is an unofficial, local desktop controller for Nothing Ear audio devices.</p>
+    <p>It displays battery and wear status and provides confirmed controls for noise cancellation, equalization, gestures, and device tools. It has no accounts, telemetry, or cloud dependency.</p>
+  </description>
+  <launchable type="desktop-id">io.github.nothinglinux.nothinglinux.desktop</launchable>
+  <provides><binary>nothing-linux</binary></provides>
+  <content_rating type="oars-1.1" />
+  <releases><release version="0.1.0" date="2026-06-30"><description><p>Initial source release focused on Nothing Ear 2024 (B171).</p></description></release></releases>
+</component>

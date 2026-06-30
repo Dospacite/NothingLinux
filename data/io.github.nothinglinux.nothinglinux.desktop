@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Nothing Linux
+Comment=Control Nothing Ear earbuds
+Exec=nothing-linux
+Icon=io.github.nothinglinux.nothinglinux
+Terminal=false
+Categories=AudioVideo;Audio;GTK;
+Keywords=Nothing;Ear;earbuds;headphones;ANC;equalizer;Bluetooth;
+StartupNotify=true
+StartupWMClass=io.github.nothinglinux.nothinglinux
+

@@ -1,0 +1,27 @@
+[package]
+name = "nothing-core"
+description = "BlueZ, session, persistence, and lifecycle services for Nothing Linux"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+async-trait.workspace = true
+bluer.workspace = true
+directories.workspace = true
+futures.workspace = true
+nothing-protocol = { path = "../protocol" }
+notify-rust.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+[lints]
+workspace = true
+
