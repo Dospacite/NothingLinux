@@ -1,6 +1,7 @@
 use crate::{
-    AncLevel, AncMode, BatteryState, ChargeLevel, DeviceCommand, DeviceEvent, EarbudSide, EqPreset,
-    Frame, Gesture, GestureAction, ProtocolError, WearState,
+    AdvancedEqProfile, AncLevel, AncMode, AudioCodec, BatteryState, ChargeLevel, DeviceCommand,
+    DeviceEvent, EarbudSide, EqBand, EqPreset, Frame, Gesture, GestureAction, ProtocolError,
+    WearState,
 };
 use std::collections::BTreeMap;
 
@@ -17,9 +18,10 @@ pub mod command {
     pub const QUERY_FIRMWARE: u16 = 0xc042;
     pub const QUERY_CUSTOM_EQ: u16 = 0xc044;
     pub const QUERY_ADVANCED_EQ: u16 = 0xc04c;
+    pub const QUERY_ADVANCED_EQ_PROFILE: u16 = 0xc04d;
     pub const QUERY_BASS: u16 = 0xc04e;
-    pub const QUERY_HIGH_QUALITY_AUDIO: u16 = 0xc050;
-    pub const QUERY_DUAL_CONNECTION: u16 = 0xc052;
+    pub const QUERY_AUDIO_CODEC: u16 = 0xc029;
+    pub const QUERY_DUAL_CONNECTION: u16 = 0xc027;
     pub const ACTIVATE: u16 = 0xf001;
     pub const FIND_BUD: u16 = 0xf002;
     pub const SET_GESTURE: u16 = 0xf003;
@@ -30,9 +32,10 @@ pub mod command {
     pub const SET_LOW_LAG: u16 = 0xf040;
     pub const SET_CUSTOM_EQ: u16 = 0xf041;
     pub const SET_ADVANCED_EQ: u16 = 0xf04f;
-    pub const SET_HIGH_QUALITY_AUDIO: u16 = 0xf01d;
+    pub const SET_ADVANCED_EQ_PROFILE: u16 = 0xf050;
+    pub const SET_AUDIO_CODEC: u16 = 0xf01c;
     pub const SET_BASS: u16 = 0xf051;
-    pub const SET_DUAL_CONNECTION: u16 = 0xf052;
+    pub const SET_DUAL_CONNECTION: u16 = 0xf01a;
     pub const EVENT_BATTERY: u16 = 0xe001;
     pub const EVENT_WEAR: u16 = 0xe002;
     pub const EVENT_ANC: u16 = 0xe003;
@@ -47,18 +50,24 @@ pub fn encode_command(command_value: &DeviceCommand, sequence: u8) -> Result<Fra
         C::QueryWear => (command::QUERY_WEAR, vec![]),
         C::QueryAnc => (command::QUERY_ANC, vec![3]),
         C::QueryEq => (command::QUERY_EQ, vec![]),
+        C::QueryCustomEq => (command::QUERY_CUSTOM_EQ, vec![]),
+        C::QueryAdvancedEqProfile => (command::QUERY_ADVANCED_EQ_PROFILE, vec![0]),
         C::QueryFirmware => (command::QUERY_FIRMWARE, vec![]),
         C::QueryGestures => (command::QUERY_GESTURES, vec![]),
         C::QueryInEarDetection => (command::QUERY_IN_EAR, vec![]),
         C::QueryLowLag => (command::QUERY_LOW_LAG, vec![]),
         C::QueryBassEnhance => (command::QUERY_BASS, vec![]),
         C::QueryAdvancedEq => (command::QUERY_ADVANCED_EQ, vec![]),
-        C::QueryHighQualityAudio => (command::QUERY_HIGH_QUALITY_AUDIO, vec![]),
+        C::QueryAudioCodec => (command::QUERY_AUDIO_CODEC, vec![]),
         C::QueryDualConnection => (command::QUERY_DUAL_CONNECTION, vec![]),
         C::SetAnc { mode, level } => (command::SET_ANC, vec![1, anc_wire(*mode, *level), 0]),
-        C::SetEqPreset(preset) => (command::SET_EQ, vec![preset_wire(*preset)?, 0]),
+        C::SetEqPreset(preset) => (command::SET_EQ, vec![preset_wire(*preset)?]),
         C::SetCustomEq(gains) => (command::SET_CUSTOM_EQ, encode_custom_eq(*gains)?),
-        C::SetAdvancedEqEnabled(enabled) => (command::SET_ADVANCED_EQ, vec![u8::from(*enabled), 0]),
+        C::SetAdvancedEqEnabled(enabled) => (command::SET_ADVANCED_EQ, vec![u8::from(*enabled)]),
+        C::SetAdvancedEqProfile(profile) => (
+            command::SET_ADVANCED_EQ_PROFILE,
+            encode_advanced_eq(profile)?,
+        ),
         C::SetGesture {
             side,
             gesture,
@@ -96,9 +105,7 @@ pub fn encode_command(command_value: &DeviceCommand, sequence: u8) -> Result<Fra
         C::StartFitTest => (command::START_FIT_TEST, vec![1]),
         C::CancelFitTest => (command::START_FIT_TEST, vec![0]),
         C::SetDualConnection(enabled) => (command::SET_DUAL_CONNECTION, vec![u8::from(*enabled)]),
-        C::SetHighQualityAudio(enabled) => {
-            (command::SET_HIGH_QUALITY_AUDIO, vec![u8::from(*enabled), 0])
-        }
+        C::SetAudioCodec(codec) => (command::SET_AUDIO_CODEC, vec![codec_wire(*codec)]),
     };
     Frame::new(id, sequence, payload)
 }
@@ -119,13 +126,21 @@ fn anc_wire(mode: AncMode, level: AncLevel) -> u8 {
 fn preset_wire(preset: EqPreset) -> Result<u8, ProtocolError> {
     match preset {
         EqPreset::Balanced => Ok(0),
-        EqPreset::MoreBass => Ok(1),
+        EqPreset::Voice => Ok(1),
         EqPreset::MoreTreble => Ok(2),
-        EqPreset::Voice => Ok(3),
-        EqPreset::Custom => Ok(4),
+        EqPreset::MoreBass => Ok(3),
+        EqPreset::Custom => Ok(5),
         EqPreset::Advanced => Err(ProtocolError::UnsupportedCommand(
             "select advanced EQ with SetAdvancedEqEnabled",
         )),
+    }
+}
+
+fn codec_wire(codec: AudioCodec) -> u8 {
+    match codec {
+        AudioCodec::Default => 0,
+        AudioCodec::Lhdc => 1,
+        AudioCodec::Ldac => 2,
     }
 }
 
@@ -178,6 +193,26 @@ fn encode_custom_eq(gains: [f32; 3]) -> Result<Vec<u8>, ProtocolError> {
     Ok(payload)
 }
 
+fn encode_advanced_eq(profile: &AdvancedEqProfile) -> Result<Vec<u8>, ProtocolError> {
+    profile.validate()?;
+    let headroom = profile
+        .bands
+        .iter()
+        .map(|band| band.gain_db)
+        .fold(0.0_f32, f32::max);
+    let mut payload = Vec::with_capacity(6 + profile.bands.len() * 13);
+    payload.push(0);
+    payload.push(profile.bands.len() as u8);
+    payload.extend_from_slice(&(-headroom).to_le_bytes());
+    for band in &profile.bands {
+        payload.push(1);
+        payload.extend_from_slice(&band.gain_db.to_le_bytes());
+        payload.extend_from_slice(&band.frequency_hz.to_le_bytes());
+        payload.extend_from_slice(&band.q.to_le_bytes());
+    }
+    Ok(payload)
+}
+
 pub fn decode_event(frame: &Frame) -> Result<Option<DeviceEvent>, ProtocolError> {
     let id = if frame.command & 0xe000 == 0xe000 {
         frame.command
@@ -196,6 +231,10 @@ pub fn decode_event(frame: &Frame) -> Result<Option<DeviceEvent>, ProtocolError>
         }
         command::QUERY_EQ => DeviceEvent::Eq(parse_eq(payload)?),
         command::QUERY_CUSTOM_EQ => DeviceEvent::CustomEq(parse_custom_eq(payload)?),
+        command::QUERY_ADVANCED_EQ => DeviceEvent::AdvancedEqEnabled(parse_bool(payload, id)?),
+        command::QUERY_ADVANCED_EQ_PROFILE => {
+            DeviceEvent::AdvancedEqProfile(parse_advanced_eq(payload)?)
+        }
         command::QUERY_FIRMWARE => DeviceEvent::Firmware(parse_string(payload, id)?),
         command::QUERY_GESTURES => DeviceEvent::Gestures(parse_gestures(payload)?),
         command::QUERY_IN_EAR => DeviceEvent::InEarDetection(
@@ -215,9 +254,7 @@ pub fn decode_event(frame: &Frame) -> Result<Option<DeviceEvent>, ProtocolError>
             let level = *payload.get(1).ok_or(ProtocolError::MalformedResponse(id))? / 2;
             DeviceEvent::BassEnhance(enabled.then_some(level))
         }
-        command::QUERY_HIGH_QUALITY_AUDIO => {
-            DeviceEvent::HighQualityAudio(parse_bool(payload, id)?)
-        }
+        command::QUERY_AUDIO_CODEC => DeviceEvent::AudioCodec(parse_audio_codec(payload, id)?),
         command::QUERY_DUAL_CONNECTION => DeviceEvent::DualConnection(parse_bool(payload, id)?),
         command::EVENT_FIT_TEST => DeviceEvent::FitTestResult {
             left_ok: *payload
@@ -234,7 +271,8 @@ pub fn decode_event(frame: &Frame) -> Result<Option<DeviceEvent>, ProtocolError>
         | command::SET_LOW_LAG
         | command::SET_CUSTOM_EQ
         | command::SET_ADVANCED_EQ
-        | command::SET_HIGH_QUALITY_AUDIO
+        | command::SET_ADVANCED_EQ_PROFILE
+        | command::SET_AUDIO_CODEC
         | command::SET_BASS
         | command::SET_DUAL_CONNECTION
         | command::FIND_BUD
@@ -252,6 +290,18 @@ fn parse_bool(payload: &[u8], command_id: u16) -> Result<bool, ProtocolError> {
         .first()
         .ok_or(ProtocolError::MalformedResponse(command_id))?
         != 0)
+}
+
+fn parse_audio_codec(payload: &[u8], command_id: u16) -> Result<AudioCodec, ProtocolError> {
+    match payload
+        .first()
+        .ok_or(ProtocolError::MalformedResponse(command_id))?
+    {
+        0 => Ok(AudioCodec::Default),
+        1 => Ok(AudioCodec::Lhdc),
+        2 => Ok(AudioCodec::Ldac),
+        _ => Err(ProtocolError::InvalidValue("audio codec")),
+    }
 }
 
 fn parse_battery(payload: &[u8]) -> Result<BatteryState, ProtocolError> {
@@ -336,11 +386,10 @@ fn parse_anc(payload: &[u8]) -> Result<(AncMode, AncLevel), ProtocolError> {
 fn parse_eq(payload: &[u8]) -> Result<EqPreset, ProtocolError> {
     match payload.first() {
         Some(0) => Ok(EqPreset::Balanced),
-        Some(1) => Ok(EqPreset::MoreBass),
+        Some(1) => Ok(EqPreset::Voice),
         Some(2) => Ok(EqPreset::MoreTreble),
-        Some(3) => Ok(EqPreset::Voice),
-        Some(4) => Ok(EqPreset::Custom),
-        Some(6) => Ok(EqPreset::Advanced),
+        Some(3) => Ok(EqPreset::MoreBass),
+        Some(5) => Ok(EqPreset::Custom),
         _ => Err(ProtocolError::MalformedResponse(command::QUERY_EQ)),
     }
 }
@@ -359,6 +408,47 @@ fn parse_custom_eq(payload: &[u8]) -> Result<[f32; 3], ProtocolError> {
         );
     }
     Ok(values)
+}
+
+fn parse_advanced_eq(payload: &[u8]) -> Result<AdvancedEqProfile, ProtocolError> {
+    if payload.len() < 6 {
+        return Err(ProtocolError::MalformedResponse(
+            command::QUERY_ADVANCED_EQ_PROFILE,
+        ));
+    }
+    let count = usize::from(payload[1]);
+    if count != AdvancedEqProfile::FREQUENCIES.len() || payload.len() < 6 + count * 13 {
+        return Err(ProtocolError::MalformedResponse(
+            command::QUERY_ADVANCED_EQ_PROFILE,
+        ));
+    }
+    let mut bands = Vec::with_capacity(count);
+    for index in 0..count {
+        let offset = 6 + index * 13;
+        let gain_db =
+            f32::from_le_bytes(payload[offset + 1..offset + 5].try_into().map_err(|_| {
+                ProtocolError::MalformedResponse(command::QUERY_ADVANCED_EQ_PROFILE)
+            })?);
+        let frequency_hz =
+            f32::from_le_bytes(payload[offset + 5..offset + 9].try_into().map_err(|_| {
+                ProtocolError::MalformedResponse(command::QUERY_ADVANCED_EQ_PROFILE)
+            })?);
+        let q =
+            f32::from_le_bytes(payload[offset + 9..offset + 13].try_into().map_err(|_| {
+                ProtocolError::MalformedResponse(command::QUERY_ADVANCED_EQ_PROFILE)
+            })?);
+        bands.push(EqBand {
+            frequency_hz,
+            gain_db,
+            q,
+        });
+    }
+    let profile = AdvancedEqProfile {
+        name: "Device profile".into(),
+        bands,
+    };
+    profile.validate()?;
+    Ok(profile)
 }
 
 fn parse_string(payload: &[u8], command_id: u16) -> Result<String, ProtocolError> {
@@ -425,13 +515,15 @@ mod tests {
             DeviceCommand::QueryWear,
             DeviceCommand::QueryAnc,
             DeviceCommand::QueryEq,
+            DeviceCommand::QueryCustomEq,
+            DeviceCommand::QueryAdvancedEqProfile,
             DeviceCommand::QueryFirmware,
             DeviceCommand::QueryGestures,
             DeviceCommand::QueryInEarDetection,
             DeviceCommand::QueryLowLag,
             DeviceCommand::QueryBassEnhance,
             DeviceCommand::QueryAdvancedEq,
-            DeviceCommand::QueryHighQualityAudio,
+            DeviceCommand::QueryAudioCodec,
             DeviceCommand::QueryDualConnection,
             DeviceCommand::SetAnc {
                 mode: AncMode::NoiseCancellation,
@@ -443,7 +535,7 @@ mod tests {
             DeviceCommand::SetBassEnhance(Some(5)),
             DeviceCommand::SetInEarDetection(true),
             DeviceCommand::SetLowLag(false),
-            DeviceCommand::SetHighQualityAudio(true),
+            DeviceCommand::SetAudioCodec(AudioCodec::Ldac),
             DeviceCommand::SetDualConnection(true),
             DeviceCommand::FindBud {
                 side: EarbudSide::Left,
@@ -491,15 +583,30 @@ mod tests {
 
     #[test]
     fn encodes_high_quality_and_dual_connection_controls() {
-        let high_quality = encode_command(&DeviceCommand::SetHighQualityAudio(true), 7)
+        let high_quality = encode_command(&DeviceCommand::SetAudioCodec(AudioCodec::Ldac), 7)
             .unwrap_or_else(|e| panic!("{e}"));
-        assert_eq!(high_quality.command, command::SET_HIGH_QUALITY_AUDIO);
-        assert_eq!(high_quality.payload, [1, 0]);
+        assert_eq!(high_quality.command, command::SET_AUDIO_CODEC);
+        assert_eq!(high_quality.payload, [2]);
 
         let dual_connection = encode_command(&DeviceCommand::SetDualConnection(false), 8)
             .unwrap_or_else(|e| panic!("{e}"));
         assert_eq!(dual_connection.command, command::SET_DUAL_CONNECTION);
         assert_eq!(dual_connection.payload, [0]);
+    }
+
+    #[test]
+    fn encodes_fixed_eq_payloads_from_b171_app() {
+        let more_bass = encode_command(&DeviceCommand::SetEqPreset(EqPreset::MoreBass), 1)
+            .unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(more_bass.payload, [3]);
+
+        let custom = encode_command(&DeviceCommand::SetEqPreset(EqPreset::Custom), 2)
+            .unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(custom.payload, [5]);
+
+        let advanced = encode_command(&DeviceCommand::SetAdvancedEqEnabled(true), 3)
+            .unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(advanced.payload, [1]);
     }
 
     #[test]

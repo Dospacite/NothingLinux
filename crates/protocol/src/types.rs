@@ -150,6 +150,14 @@ pub enum EqPreset {
     Advanced,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum AudioCodec {
+    #[default]
+    Default,
+    Lhdc,
+    Ldac,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct EqBand {
     pub frequency_hz: f32,
@@ -165,7 +173,7 @@ pub struct AdvancedEqProfile {
 
 impl AdvancedEqProfile {
     pub const FREQUENCIES: [f32; 8] = [
-        20.0, 63.0, 250.0, 1_000.0, 4_000.0, 8_000.0, 12_000.0, 20_000.0,
+        55.0, 110.0, 220.0, 440.0, 1_320.0, 3_300.0, 6_600.0, 13_200.0,
     ];
     pub fn validate(&self) -> Result<(), ProtocolError> {
         if self.name.trim().is_empty() || self.name.chars().count() > 48 {
@@ -244,11 +252,13 @@ pub struct DeviceSnapshot {
     pub anc_level: AncLevel,
     pub eq_preset: EqPreset,
     pub custom_eq: [f32; 3],
+    pub advanced_eq_enabled: Option<bool>,
+    pub advanced_eq_profile: Option<AdvancedEqProfile>,
     pub gestures: BTreeMap<(EarbudSide, Gesture), GestureAction>,
     pub bass_enhance: Option<u8>,
     pub in_ear_detection: Option<bool>,
     pub low_lag: Option<bool>,
-    pub high_quality_audio: Option<bool>,
+    pub audio_codec: Option<AudioCodec>,
     pub dual_connection: Option<bool>,
     pub firmware: Option<String>,
     pub model: Option<String>,
@@ -264,11 +274,13 @@ impl Default for DeviceSnapshot {
             anc_level: AncLevel::High,
             eq_preset: EqPreset::Balanced,
             custom_eq: [0.0; 3],
+            advanced_eq_enabled: None,
+            advanced_eq_profile: None,
             gestures: BTreeMap::new(),
             bass_enhance: None,
             in_ear_detection: None,
             low_lag: None,
-            high_quality_audio: None,
+            audio_codec: None,
             dual_connection: None,
             firmware: None,
             model: None,
@@ -283,13 +295,15 @@ pub enum DeviceCommand {
     QueryWear,
     QueryAnc,
     QueryEq,
+    QueryCustomEq,
+    QueryAdvancedEqProfile,
     QueryFirmware,
     QueryGestures,
     QueryInEarDetection,
     QueryLowLag,
     QueryBassEnhance,
     QueryAdvancedEq,
-    QueryHighQualityAudio,
+    QueryAudioCodec,
     QueryDualConnection,
     SetAnc {
         mode: AncMode,
@@ -298,6 +312,7 @@ pub enum DeviceCommand {
     SetEqPreset(EqPreset),
     SetCustomEq([f32; 3]),
     SetAdvancedEqEnabled(bool),
+    SetAdvancedEqProfile(Box<AdvancedEqProfile>),
     SetGesture {
         side: EarbudSide,
         gesture: Gesture,
@@ -313,7 +328,7 @@ pub enum DeviceCommand {
     StartFitTest,
     CancelFitTest,
     SetDualConnection(bool),
-    SetHighQualityAudio(bool),
+    SetAudioCodec(AudioCodec),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -328,11 +343,13 @@ pub enum DeviceEvent {
     },
     Eq(EqPreset),
     CustomEq([f32; 3]),
+    AdvancedEqEnabled(bool),
+    AdvancedEqProfile(AdvancedEqProfile),
     Gestures(BTreeMap<(EarbudSide, Gesture), GestureAction>),
     BassEnhance(Option<u8>),
     InEarDetection(bool),
     LowLag(bool),
-    HighQualityAudio(bool),
+    AudioCodec(AudioCodec),
     DualConnection(bool),
     Firmware(String),
     FitTestResult {

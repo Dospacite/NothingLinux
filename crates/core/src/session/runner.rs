@@ -186,13 +186,15 @@ async fn send_sync_queries<T: FrameTransport>(
         DeviceCommand::QueryWear,
         DeviceCommand::QueryAnc,
         DeviceCommand::QueryEq,
+        DeviceCommand::QueryCustomEq,
+        DeviceCommand::QueryAdvancedEqProfile,
         DeviceCommand::QueryFirmware,
         DeviceCommand::QueryGestures,
         DeviceCommand::QueryInEarDetection,
         DeviceCommand::QueryLowLag,
         DeviceCommand::QueryBassEnhance,
         DeviceCommand::QueryAdvancedEq,
-        DeviceCommand::QueryHighQualityAudio,
+        DeviceCommand::QueryAudioCodec,
         DeviceCommand::QueryDualConnection,
     ];
     for query in queries {
@@ -239,13 +241,15 @@ fn is_mutation(command: &DeviceCommand) -> bool {
             | DeviceCommand::QueryWear
             | DeviceCommand::QueryAnc
             | DeviceCommand::QueryEq
+            | DeviceCommand::QueryCustomEq
+            | DeviceCommand::QueryAdvancedEqProfile
             | DeviceCommand::QueryFirmware
             | DeviceCommand::QueryGestures
             | DeviceCommand::QueryInEarDetection
             | DeviceCommand::QueryLowLag
             | DeviceCommand::QueryBassEnhance
             | DeviceCommand::QueryAdvancedEq
-            | DeviceCommand::QueryHighQualityAudio
+            | DeviceCommand::QueryAudioCodec
             | DeviceCommand::QueryDualConnection
     )
 }
@@ -254,13 +258,14 @@ fn confirmation_query(command: &DeviceCommand) -> Option<DeviceCommand> {
     match command {
         DeviceCommand::SetAnc { .. } => Some(DeviceCommand::QueryAnc),
         DeviceCommand::SetEqPreset(_) => Some(DeviceCommand::QueryEq),
-        DeviceCommand::SetCustomEq(_) => Some(DeviceCommand::QueryEq),
+        DeviceCommand::SetCustomEq(_) => Some(DeviceCommand::QueryCustomEq),
         DeviceCommand::SetAdvancedEqEnabled(_) => Some(DeviceCommand::QueryAdvancedEq),
+        DeviceCommand::SetAdvancedEqProfile(_) => Some(DeviceCommand::QueryAdvancedEqProfile),
         DeviceCommand::SetGesture { .. } => Some(DeviceCommand::QueryGestures),
         DeviceCommand::SetBassEnhance(_) => Some(DeviceCommand::QueryBassEnhance),
         DeviceCommand::SetInEarDetection(_) => Some(DeviceCommand::QueryInEarDetection),
         DeviceCommand::SetLowLag(_) => Some(DeviceCommand::QueryLowLag),
-        DeviceCommand::SetHighQualityAudio(_) => Some(DeviceCommand::QueryHighQualityAudio),
+        DeviceCommand::SetAudioCodec(_) => Some(DeviceCommand::QueryAudioCodec),
         DeviceCommand::SetDualConnection(_) => Some(DeviceCommand::QueryDualConnection),
         _ => None,
     }
@@ -276,11 +281,13 @@ fn apply_event(snapshot: &mut DeviceSnapshot, event: &DeviceEvent) {
         }
         DeviceEvent::Eq(value) => snapshot.eq_preset = *value,
         DeviceEvent::CustomEq(value) => snapshot.custom_eq = *value,
+        DeviceEvent::AdvancedEqEnabled(value) => snapshot.advanced_eq_enabled = Some(*value),
+        DeviceEvent::AdvancedEqProfile(value) => snapshot.advanced_eq_profile = Some(value.clone()),
         DeviceEvent::Gestures(value) => snapshot.gestures = value.clone(),
         DeviceEvent::BassEnhance(value) => snapshot.bass_enhance = *value,
         DeviceEvent::InEarDetection(value) => snapshot.in_ear_detection = Some(*value),
         DeviceEvent::LowLag(value) => snapshot.low_lag = Some(*value),
-        DeviceEvent::HighQualityAudio(value) => snapshot.high_quality_audio = Some(*value),
+        DeviceEvent::AudioCodec(value) => snapshot.audio_codec = Some(*value),
         DeviceEvent::DualConnection(value) => snapshot.dual_connection = Some(*value),
         DeviceEvent::Firmware(value) => snapshot.firmware = Some(value.clone()),
         DeviceEvent::ConnectionChanged(value) => snapshot.connection = *value,
@@ -342,6 +349,38 @@ mod tests {
         }
     }
 
+    fn encode_test_custom_eq(gains: [f32; 3]) -> Vec<u8> {
+        let mut payload = vec![
+            3, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0x75, 0x44, 0xc3, 0xf5, 0x28, 0x3f, 2, 0, 0, 0, 0,
+            0, 0xc0, 0x5a, 0x45, 0, 0, 0x80, 0x3f, 0, 0, 0, 0, 0, 0, 0, 0x0c, 0x43, 0xcd, 0xcc,
+            0x4c, 0x3f, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        ];
+        let headroom = gains.into_iter().fold(0.0_f32, f32::max);
+        payload[1..5].copy_from_slice(&(-headroom).to_le_bytes());
+        for (index, gain) in gains.into_iter().enumerate() {
+            let offset = 6 + index * 13;
+            payload[offset..offset + 4].copy_from_slice(&gain.to_le_bytes());
+        }
+        payload
+    }
+
+    fn encode_test_advanced_eq_profile() -> Vec<u8> {
+        let frequencies = [
+            55.0_f32, 110.0, 220.0, 440.0, 1_320.0, 3_300.0, 6_600.0, 13_200.0,
+        ];
+        let mut payload = Vec::with_capacity(110);
+        payload.push(0);
+        payload.push(frequencies.len() as u8);
+        payload.extend_from_slice(&0.0_f32.to_le_bytes());
+        for frequency in frequencies {
+            payload.push(1);
+            payload.extend_from_slice(&0.0_f32.to_le_bytes());
+            payload.extend_from_slice(&frequency.to_le_bytes());
+            payload.extend_from_slice(&1.0_f32.to_le_bytes());
+        }
+        payload
+    }
+
     async fn respond(mut device: DuplexStream) {
         let mut decoder = FrameDecoder::new();
         let mut buffer = [0_u8; 512];
@@ -358,17 +397,21 @@ mod tests {
                     command::QUERY_WEAR => (0x400a, vec![2, 2, 0x84, 3, 0x80]),
                     command::QUERY_ANC => (0x401e, vec![1, 5, 0]),
                     command::QUERY_EQ => (0x401f, vec![0]),
+                    command::QUERY_CUSTOM_EQ => (0x4044, encode_test_custom_eq([0.0; 3])),
+                    command::QUERY_ADVANCED_EQ_PROFILE => {
+                        (0x404d, encode_test_advanced_eq_profile())
+                    }
                     command::QUERY_FIRMWARE => (0x4042, b"1.2.3".to_vec()),
                     command::QUERY_GESTURES => (0x4018, vec![0]),
                     command::QUERY_IN_EAR => (0x400e, vec![1, 1, 1]),
                     command::QUERY_LOW_LAG => (0x4041, vec![2]),
                     command::QUERY_BASS => (0x404e, vec![1, 6]),
                     command::QUERY_ADVANCED_EQ => (0x404c, vec![0]),
-                    command::QUERY_HIGH_QUALITY_AUDIO => (0x4050, vec![1]),
-                    command::QUERY_DUAL_CONNECTION => (0x4052, vec![1]),
+                    command::QUERY_AUDIO_CODEC => (0x4029, vec![2]),
+                    command::QUERY_DUAL_CONNECTION => (0x4027, vec![1]),
                     command::SET_ANC => (0x700f, vec![]),
-                    command::SET_HIGH_QUALITY_AUDIO => (0x701d, vec![]),
-                    command::SET_DUAL_CONNECTION => (0x7052, vec![]),
+                    command::SET_AUDIO_CODEC => (0x701c, vec![]),
+                    command::SET_DUAL_CONNECTION => (0x701a, vec![]),
                     _ => continue,
                 };
                 let response = Frame::new(id, frame.sequence, payload)
@@ -446,6 +489,10 @@ mod tests {
                 nothing_protocol::EqPreset::Balanced,
             )),
             Some(DeviceCommand::QueryEq)
+        );
+        assert_eq!(
+            confirmation_query(&DeviceCommand::SetCustomEq([0.0; 3])),
+            Some(DeviceCommand::QueryCustomEq)
         );
     }
 }

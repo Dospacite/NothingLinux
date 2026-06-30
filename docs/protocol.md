@@ -28,16 +28,19 @@ The session queries protocol version (`c001`), activates (`f001`), reads remote 
 | Gestures | `c018` | `f003` |
 | ANC | `c01e` | `f00f` / `e003` |
 | EQ preset | `c01f` | `f010` |
+| High-quality audio codec | `c029` | `f01c` |
+| Dual connection | `c027` | `f01a` |
 | Low-lag mode | `c041` | `f040` |
 | Firmware | `c042` | read-only |
 | Three-band custom EQ | `c044` | `f041` |
 | Advanced EQ enabled | `c04c` | `f04f` |
+| Advanced EQ profile | `c04d` | `f050` |
 | Bass Enhance | `c04e` | `f051` |
-| High-quality audio | `c050` | `f01d` |
-| Dual connection | `c052` | `f052` |
 | Find earbud | — | `f002` |
 | Ear-tip fit test | — | `f014` / `e00d` |
 
 Writes are serialized. The UI retains the last confirmed value until an acknowledgement and query readback arrive. A missing acknowledgement produces a failure event after four seconds. Unknown models and unverified feature commands are rejected before framing.
+
+EQ preset writes use one-byte mode values: balanced `00`, voice `01`, more treble `02`, more bass `03`, and simple custom EQ `05`. High-quality audio codec selection uses `f01c/c029` with default `00`, LHDC `01`, and LDAC `02`.
 
 Raw protocol logging is off by default. Normal diagnostics redact Bluetooth addresses and serial-like identifiers.

@@ -11,8 +11,14 @@ use navigation::bottom_navigation;
 use nothing_core::{
     AppConfig, DeviceCapabilities, DeviceCommand, DeviceEvent, DeviceSnapshot, Paths,
 };
-use pages::{controls_page, equalizer_page, more_page, noise_page, overview_page};
-use std::{cell::RefCell, rc::Rc, sync::mpsc};
+use pages::{
+    MorePageDeps, MoreRefs, controls_page, equalizer_page, more_page, noise_page, overview_page,
+};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+    sync::mpsc,
+};
 use style::install_css;
 
 pub struct Shell(Rc<ShellInner>);
@@ -35,6 +41,8 @@ struct ShellInner {
     wear: gtk::Label,
     firmware: gtk::Label,
     write_widgets: Vec<gtk::Widget>,
+    updating_controls: Rc<Cell<bool>>,
+    more_refs: MoreRefs,
 }
 
 impl Shell {
@@ -59,13 +67,17 @@ impl Shell {
                 }
                 DeviceEvent::Eq(value) => snapshot.eq_preset = *value,
                 DeviceEvent::CustomEq(value) => snapshot.custom_eq = *value,
+                DeviceEvent::AdvancedEqEnabled(value) => {
+                    snapshot.advanced_eq_enabled = Some(*value);
+                }
+                DeviceEvent::AdvancedEqProfile(value) => {
+                    snapshot.advanced_eq_profile = Some(value.clone());
+                }
                 DeviceEvent::Gestures(value) => snapshot.gestures = value.clone(),
                 DeviceEvent::BassEnhance(value) => snapshot.bass_enhance = *value,
                 DeviceEvent::InEarDetection(value) => snapshot.in_ear_detection = Some(*value),
                 DeviceEvent::LowLag(value) => snapshot.low_lag = Some(*value),
-                DeviceEvent::HighQualityAudio(value) => {
-                    snapshot.high_quality_audio = Some(*value);
-                }
+                DeviceEvent::AudioCodec(value) => snapshot.audio_codec = Some(*value),
                 DeviceEvent::DualConnection(value) => {
                     snapshot.dual_connection = Some(*value);
                 }
@@ -113,6 +125,34 @@ impl Shell {
                 .as_deref()
                 .unwrap_or("Waiting for device…"),
         );
+        self.0.updating_controls.set(true);
+        if let Some(level) = snapshot.bass_enhance {
+            self.0.more_refs.bass_switch.set_active(true);
+            self.0.more_refs.bass_scale.set_value(f64::from(level));
+        } else {
+            self.0.more_refs.bass_switch.set_active(false);
+        }
+        self.0
+            .more_refs
+            .in_ear_switch
+            .set_active(snapshot.in_ear_detection.unwrap_or(false));
+        self.0
+            .more_refs
+            .low_lag_switch
+            .set_active(snapshot.low_lag.unwrap_or(false));
+        self.0
+            .more_refs
+            .dual_switch
+            .set_active(snapshot.dual_connection.unwrap_or(false));
+        self.0
+            .more_refs
+            .codec
+            .set_selected(match snapshot.audio_codec.unwrap_or_default() {
+                nothing_core::AudioCodec::Default => 0,
+                nothing_core::AudioCodec::Lhdc => 1,
+                nothing_core::AudioCodec::Ldac => 2,
+            });
+        self.0.updating_controls.set(false);
     }
 }
 
@@ -161,6 +201,7 @@ pub fn build(
     layout.append(&bottom_navigation(&stack));
 
     let snapshot = Rc::new(RefCell::new(DeviceSnapshot::default()));
+    let updating_controls = Rc::new(Cell::new(false));
     let mut write_widgets = Vec::new();
     let overview = overview_page(&commands, &mut write_widgets);
     let overview_refs = overview.1;
@@ -180,19 +221,20 @@ pub fn build(
         Some("controls"),
         "Controls",
     );
-    stack.add_titled(
-        &more_page(
-            &commands,
-            &mut write_widgets,
-            snapshot.clone(),
-            toast.clone(),
+    let more = more_page(
+        &commands,
+        &mut write_widgets,
+        MorePageDeps {
+            snapshot: snapshot.clone(),
+            updating_controls: updating_controls.clone(),
+            toast: toast.clone(),
             config,
             paths,
-            overview_refs.firmware.clone(),
-        ),
-        Some("more"),
-        "More",
+            firmware: overview_refs.firmware.clone(),
+        },
     );
+    stack.add_titled(&more.0, Some("more"), "More");
+    let more_refs = more.1;
 
     let shell = Shell(Rc::new(ShellInner {
         window,
@@ -206,6 +248,8 @@ pub fn build(
         wear: overview_refs.wear,
         firmware: overview_refs.firmware,
         write_widgets,
+        updating_controls,
+        more_refs,
     }));
     for widget in &shell.0.write_widgets {
         widget.set_sensitive(false);

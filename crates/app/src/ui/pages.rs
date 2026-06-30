@@ -4,16 +4,38 @@ use super::components::{
 };
 use adw::prelude::*;
 use nothing_core::{
-    AncLevel, AncMode, AppConfig, DeviceCommand, DeviceSnapshot, EarbudSide, EqPreset, Gesture,
-    GestureAction, Paths,
+    AdvancedEqProfile, AncLevel, AncMode, AppConfig, AudioCodec, DeviceCommand, DeviceSnapshot,
+    EarbudSide, EqBand, EqPreset, Gesture, GestureAction, Paths,
 };
-use std::{cell::RefCell, rc::Rc, sync::mpsc};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+    sync::mpsc,
+};
 
 pub(super) struct OverviewRefs {
     pub(super) left: gtk::Label,
     pub(super) right: gtk::Label,
     pub(super) case: gtk::Label,
     pub(super) wear: gtk::Label,
+    pub(super) firmware: gtk::Label,
+}
+
+pub(super) struct MoreRefs {
+    pub(super) bass_switch: gtk::Switch,
+    pub(super) bass_scale: gtk::Scale,
+    pub(super) in_ear_switch: gtk::Switch,
+    pub(super) low_lag_switch: gtk::Switch,
+    pub(super) dual_switch: gtk::Switch,
+    pub(super) codec: gtk::DropDown,
+}
+
+pub(super) struct MorePageDeps {
+    pub(super) snapshot: Rc<RefCell<DeviceSnapshot>>,
+    pub(super) updating_controls: Rc<Cell<bool>>,
+    pub(super) toast: adw::ToastOverlay,
+    pub(super) config: Rc<RefCell<AppConfig>>,
+    pub(super) paths: Option<Paths>,
     pub(super) firmware: gtk::Label,
 }
 
@@ -154,16 +176,31 @@ pub(super) fn equalizer_page(
         "Shape the sound. Profiles stay on this computer.",
     ));
     let presets = section("PRESETS", "Select one profile at a time.");
-    for (label, preset) in [
-        ("Balanced", EqPreset::Balanced),
-        ("More bass", EqPreset::MoreBass),
-        ("More treble", EqPreset::MoreTreble),
-        ("Voice", EqPreset::Voice),
-    ] {
-        let button = command_button(label, DeviceCommand::SetEqPreset(preset), commands);
-        writes.push(button.clone().upcast());
-        presets.append(&button);
-    }
+    let preset_row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    preset_row.append(
+        &gtk::Label::builder()
+            .label("Profile")
+            .hexpand(true)
+            .halign(gtk::Align::Start)
+            .build(),
+    );
+    let preset_dropdown =
+        gtk::DropDown::from_strings(&["Balanced", "More bass", "More treble", "Voice"]);
+    let sender = commands.clone();
+    preset_dropdown.connect_selected_notify(move |dropdown| {
+        let preset = match dropdown.selected() {
+            0 => EqPreset::Balanced,
+            1 => EqPreset::MoreBass,
+            2 => EqPreset::MoreTreble,
+            3 => EqPreset::Voice,
+            _ => return,
+        };
+        let _ = sender.send(DeviceCommand::SetAdvancedEqEnabled(false));
+        let _ = sender.send(DeviceCommand::SetEqPreset(preset));
+    });
+    writes.push(preset_dropdown.clone().upcast());
+    preset_row.append(&preset_dropdown);
+    presets.append(&preset_row);
     page.append(&presets);
     let custom = section(
         "THREE-BAND CUSTOM",
@@ -184,6 +221,7 @@ pub(super) fn equalizer_page(
         scale.set_draw_value(true);
         row.append(&scale);
         custom.append(&row);
+        writes.push(scale.clone().upcast());
         scales.push(scale);
     }
     let apply = gtk::Button::with_label("Apply custom EQ");
@@ -195,6 +233,8 @@ pub(super) fn equalizer_page(
             scales[1].value() as f32,
             scales[2].value() as f32,
         ];
+        let _ = sender.send(DeviceCommand::SetAdvancedEqEnabled(false));
+        let _ = sender.send(DeviceCommand::SetEqPreset(EqPreset::Custom));
         let _ = sender.send(DeviceCommand::SetCustomEq(gains));
     });
     writes.push(apply.clone().upcast());
@@ -202,33 +242,77 @@ pub(super) fn equalizer_page(
     page.append(&custom);
     let advanced = section(
         "EIGHT-BAND ADVANCED",
-        "20 Hz · 63 Hz · 250 Hz · 1 kHz · 4 kHz · 8 kHz · 12 kHz · 20 kHz",
+        "55 Hz · 110 Hz · 220 Hz · 440 Hz · 1.32 kHz · 3.3 kHz · 6.6 kHz · 13.2 kHz",
     );
-    for frequency in ["20", "63", "250", "1K", "4K", "8K", "12K", "20K"] {
+    let mut advanced_gains = Vec::new();
+    let mut advanced_q = Vec::new();
+    for frequency in AdvancedEqProfile::FREQUENCIES {
         let row = gtk::Box::new(gtk::Orientation::Horizontal, 10);
         row.append(
             &gtk::Label::builder()
-                .label(frequency)
-                .width_chars(4)
+                .label(format_frequency(frequency))
+                .width_chars(6)
                 .build(),
         );
         let gain = gtk::Scale::with_range(gtk::Orientation::Horizontal, -12.0, 12.0, 0.5);
         gain.set_hexpand(true);
+        gain.set_draw_value(true);
         gain.set_tooltip_text(Some("Gain in decibels"));
+        writes.push(gain.clone().upcast());
         row.append(&gain);
-        let q = gtk::SpinButton::with_range(0.1, 10.0, 0.1);
+        let q = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.1, 10.0, 0.1);
+        q.set_width_request(96);
         q.set_value(1.0);
+        q.set_draw_value(true);
+        q.set_digits(1);
         q.set_tooltip_text(Some("Q factor"));
         row.append(&q);
+        writes.push(q.clone().upcast());
+        advanced_gains.push(gain);
+        advanced_q.push(q);
         advanced.append(&row);
     }
-    let enable = command_button(
-        "Enable advanced EQ",
-        DeviceCommand::SetAdvancedEqEnabled(true),
-        commands,
+    let advanced_switch_row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    advanced_switch_row.append(
+        &gtk::Label::builder()
+            .label("Advanced EQ")
+            .hexpand(true)
+            .halign(gtk::Align::Start)
+            .build(),
     );
-    writes.push(enable.clone().upcast());
-    advanced.append(&enable);
+    let advanced_switch = gtk::Switch::builder()
+        .halign(gtk::Align::End)
+        .valign(gtk::Align::Center)
+        .build();
+    let sender = commands.clone();
+    advanced_switch.connect_active_notify(move |switch| {
+        let _ = sender.send(DeviceCommand::SetAdvancedEqEnabled(switch.is_active()));
+    });
+    writes.push(advanced_switch.clone().upcast());
+    advanced_switch_row.append(&advanced_switch);
+    advanced.append(&advanced_switch_row);
+    let apply_advanced = gtk::Button::with_label("Apply advanced EQ");
+    apply_advanced.add_css_class("suggested-action");
+    let sender = commands.clone();
+    apply_advanced.connect_clicked(move |_| {
+        let bands = AdvancedEqProfile::FREQUENCIES
+            .into_iter()
+            .enumerate()
+            .map(|(index, frequency_hz)| EqBand {
+                frequency_hz,
+                gain_db: advanced_gains[index].value() as f32,
+                q: advanced_q[index].value() as f32,
+            })
+            .collect();
+        let profile = AdvancedEqProfile {
+            name: "Nothing Linux".into(),
+            bands,
+        };
+        let _ = sender.send(DeviceCommand::SetAdvancedEqEnabled(true));
+        let _ = sender.send(DeviceCommand::SetAdvancedEqProfile(Box::new(profile)));
+    });
+    writes.push(apply_advanced.clone().upcast());
+    advanced.append(&apply_advanced);
     page.append(&advanced);
     scrolled(page)
 }
@@ -314,63 +398,178 @@ pub(super) fn controls_page(
 pub(super) fn more_page(
     commands: &mpsc::Sender<DeviceCommand>,
     writes: &mut Vec<gtk::Widget>,
-    snapshot: Rc<RefCell<DeviceSnapshot>>,
-    toast: adw::ToastOverlay,
-    config: Rc<RefCell<AppConfig>>,
-    paths: Option<Paths>,
-    firmware: gtk::Label,
-) -> gtk::ScrolledWindow {
+    deps: MorePageDeps,
+) -> (gtk::ScrolledWindow, MoreRefs) {
+    let MorePageDeps {
+        snapshot,
+        updating_controls,
+        toast,
+        config,
+        paths,
+        firmware,
+    } = deps;
     let page = page_box();
     page.append(&page_title(
         "MORE",
         "Device tools and local application settings.",
     ));
-    let sound = section("SOUND & DETECTION", "Optional features confirmed for B171.");
-    for (label, command) in [
-        (
-            "Bass Enhance · Level 3",
-            DeviceCommand::SetBassEnhance(Some(3)),
-        ),
-        (
-            "In-ear detection · On",
-            DeviceCommand::SetInEarDetection(true),
-        ),
-        ("Low-lag mode · On", DeviceCommand::SetLowLag(true)),
-        (
-            "High-quality audio · On",
-            DeviceCommand::SetHighQualityAudio(true),
-        ),
-        (
-            "High-quality audio · Off",
-            DeviceCommand::SetHighQualityAudio(false),
-        ),
-        (
-            "Dual connection · On",
-            DeviceCommand::SetDualConnection(true),
-        ),
-        (
-            "Dual connection · Off",
-            DeviceCommand::SetDualConnection(false),
-        ),
-    ] {
-        let button = command_button(label, command, commands);
-        writes.push(button.clone().upcast());
-        sound.append(&button);
-    }
+    let sound = section(
+        "SOUND & DETECTION",
+        "Optional features confirmed for B171. Dual connection may require an earbud reboot.",
+    );
+    let current = snapshot.borrow().clone();
+    let bass_enabled = current.bass_enhance.is_some();
+    let bass_level = f64::from(current.bass_enhance.unwrap_or(3).clamp(1, 5));
+    let bass_box = gtk::Box::new(gtk::Orientation::Vertical, 8);
+    let bass_row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    bass_row.append(
+        &gtk::Label::builder()
+            .label("Bass Enhance")
+            .hexpand(true)
+            .halign(gtk::Align::Start)
+            .build(),
+    );
+    let bass_switch = gtk::Switch::builder()
+        .active(bass_enabled)
+        .halign(gtk::Align::End)
+        .valign(gtk::Align::Center)
+        .build();
+    let bass_scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 1.0, 5.0, 1.0);
+    bass_scale.set_value(bass_level);
+    bass_scale.set_digits(0);
+    bass_scale.set_draw_value(true);
+    bass_scale.set_hexpand(true);
+    let sender = commands.clone();
+    let scale_for_switch = bass_scale.clone();
+    let updating = updating_controls.clone();
+    bass_switch.connect_active_notify(move |switch| {
+        if updating.get() {
+            return;
+        }
+        let command = if switch.is_active() {
+            DeviceCommand::SetBassEnhance(Some(scale_for_switch.value().round() as u8))
+        } else {
+            DeviceCommand::SetBassEnhance(None)
+        };
+        let _ = sender.send(command);
+    });
+    let sender = commands.clone();
+    let switch_for_scale = bass_switch.clone();
+    let updating = updating_controls.clone();
+    bass_scale.connect_value_changed(move |scale| {
+        if updating.get() {
+            return;
+        }
+        if switch_for_scale.is_active() {
+            let _ = sender.send(DeviceCommand::SetBassEnhance(Some(
+                scale.value().round() as u8
+            )));
+        }
+    });
+    writes.push(bass_switch.clone().upcast());
+    writes.push(bass_scale.clone().upcast());
+    bass_row.append(&bass_switch);
+    bass_box.append(&bass_row);
+    bass_box.append(&bass_scale);
+    sound.append(&bass_box);
+
+    let (in_ear, in_ear_switch) = switch_control(
+        "In-ear detection",
+        current.in_ear_detection.unwrap_or(false),
+        writes,
+        {
+            let sender = commands.clone();
+            let updating = updating_controls.clone();
+            move |enabled| {
+                if updating.get() {
+                    return;
+                }
+                let _ = sender.send(DeviceCommand::SetInEarDetection(enabled));
+            }
+        },
+    );
+    sound.append(&in_ear);
+    let (low_lag, low_lag_switch) =
+        switch_control("Low-lag mode", current.low_lag.unwrap_or(false), writes, {
+            let sender = commands.clone();
+            let updating = updating_controls.clone();
+            move |enabled| {
+                if updating.get() {
+                    return;
+                }
+                let _ = sender.send(DeviceCommand::SetLowLag(enabled));
+            }
+        });
+    sound.append(&low_lag);
+    let (dual, dual_switch) = switch_control(
+        "Dual connection",
+        current.dual_connection.unwrap_or(false),
+        writes,
+        {
+            let sender = commands.clone();
+            let updating = updating_controls.clone();
+            move |enabled| {
+                if updating.get() {
+                    return;
+                }
+                let _ = sender.send(DeviceCommand::SetDualConnection(enabled));
+            }
+        },
+    );
+    sound.append(&dual);
+    let codec_row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    codec_row.append(
+        &gtk::Label::builder()
+            .label("High-quality audio codec")
+            .hexpand(true)
+            .halign(gtk::Align::Start)
+            .build(),
+    );
+    let codec = gtk::DropDown::from_strings(&["Default", "LHDC", "LDAC"]);
+    codec.set_selected(match current.audio_codec.unwrap_or_default() {
+        AudioCodec::Default => 0,
+        AudioCodec::Lhdc => 1,
+        AudioCodec::Ldac => 2,
+    });
+    let sender = commands.clone();
+    let updating = updating_controls.clone();
+    codec.connect_selected_notify(move |dropdown| {
+        if updating.get() {
+            return;
+        }
+        let codec = match dropdown.selected() {
+            0 => AudioCodec::Default,
+            1 => AudioCodec::Lhdc,
+            2 => AudioCodec::Ldac,
+            _ => return,
+        };
+        let _ = sender.send(DeviceCommand::SetAudioCodec(codec));
+    });
+    writes.push(codec.clone().upcast());
+    codec_row.append(&codec);
+    sound.append(&codec_row);
     page.append(&sound);
     let find = section(
         "FIND EARBUDS",
-        "Remove earbuds before playing the locator sound. Stop is always available.",
+        "Remove earbuds before playing the locator sound. Each side toggles between play and pause.",
     );
-    for (label, side) in [
-        ("Play left", EarbudSide::Left),
-        ("Play right", EarbudSide::Right),
-    ] {
-        let button = gtk::Button::with_label(label);
+    for (label, side) in [("Left", EarbudSide::Left), ("Right", EarbudSide::Right)] {
+        let button = gtk::Button::with_label(&format!("{label} · Play"));
         let sender = commands.clone();
         let snapshot = snapshot.clone();
         let toast = toast.clone();
-        button.connect_clicked(move |_| {
+        let ringing = Rc::new(Cell::new(false));
+        let ringing_for_click = ringing.clone();
+        button.connect_clicked(move |button| {
+            if ringing_for_click.get() {
+                ringing_for_click.set(false);
+                button.set_label(&format!("{label} · Play"));
+                let _ = sender.send(DeviceCommand::FindBud {
+                    side,
+                    ringing: false,
+                });
+                return;
+            }
             let worn = if side == EarbudSide::Left {
                 snapshot.borrow().wear.left
             } else {
@@ -381,27 +580,14 @@ pub(super) fn more_page(
                     "This earbud is reported as worn. Remove it before playing a loud locator sound.",
                 ));
             } else {
+                ringing_for_click.set(true);
+                button.set_label(&format!("{label} · Pause"));
                 let _ = sender.send(DeviceCommand::FindBud {
                     side,
                     ringing: true,
                 });
             }
         });
-        writes.push(button.clone().upcast());
-        find.append(&button);
-    }
-    for (label, side) in [
-        ("Stop left", EarbudSide::Left),
-        ("Stop right", EarbudSide::Right),
-    ] {
-        let button = command_button(
-            label,
-            DeviceCommand::FindBud {
-                side,
-                ringing: false,
-            },
-            commands,
-        );
         writes.push(button.clone().upcast());
         find.append(&button);
     }
@@ -436,5 +622,56 @@ pub(super) fn more_page(
     });
     application.append(&autostart);
     page.append(&application);
-    scrolled(page)
+    (
+        scrolled(page),
+        MoreRefs {
+            bass_switch,
+            bass_scale,
+            in_ear_switch,
+            low_lag_switch,
+            dual_switch,
+            codec,
+        },
+    )
+}
+
+fn switch_control<F>(
+    label: &str,
+    active: bool,
+    writes: &mut Vec<gtk::Widget>,
+    on_change: F,
+) -> (gtk::Box, gtk::Switch)
+where
+    F: Fn(bool) + 'static,
+{
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    row.append(
+        &gtk::Label::builder()
+            .label(label)
+            .hexpand(true)
+            .halign(gtk::Align::Start)
+            .build(),
+    );
+    let switch = gtk::Switch::builder()
+        .active(active)
+        .halign(gtk::Align::End)
+        .valign(gtk::Align::Center)
+        .build();
+    switch.connect_active_notify(move |switch| on_change(switch.is_active()));
+    writes.push(switch.clone().upcast());
+    row.append(&switch);
+    (row, switch)
+}
+
+fn format_frequency(value: f32) -> String {
+    if value >= 1_000.0 {
+        let khz = value / 1_000.0;
+        if khz.fract() == 0.0 {
+            format!("{khz:.0}K")
+        } else {
+            format!("{khz:.1}K")
+        }
+    } else {
+        format!("{value:.0}")
+    }
 }
