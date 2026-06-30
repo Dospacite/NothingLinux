@@ -1,9 +1,6 @@
-use super::{
-    artwork::draw_earbuds,
-    components::{
-        battery_label, command_button, gesture_name, page_box, page_title, scrolled, section,
-        unsupported,
-    },
+use super::components::{
+    battery_label, command_button, gesture_name, page_box, page_title, scrolled, section,
+    unsupported,
 };
 use adw::prelude::*;
 use nothing_core::{
@@ -30,18 +27,6 @@ pub(super) fn overview_page(
         .spacing(12)
         .css_classes(["hero-card"])
         .build();
-    let illustration = gtk::DrawingArea::builder()
-        .height_request(220)
-        .hexpand(true)
-        .accessible_role(gtk::AccessibleRole::Img)
-        .build();
-    illustration.update_property(&[gtk::accessible::Property::Label(
-        "Original abstract illustration of two earbuds",
-    )]);
-    illustration.set_draw_func(|_, cr, width, height| {
-        draw_earbuds(cr, f64::from(width), f64::from(height))
-    });
-    hero.append(&illustration);
     let batteries = gtk::Box::builder()
         .orientation(gtk::Orientation::Horizontal)
         .homogeneous(true)
@@ -351,19 +336,27 @@ pub(super) fn more_page(
             DeviceCommand::SetInEarDetection(true),
         ),
         ("Low-lag mode · On", DeviceCommand::SetLowLag(true)),
+        (
+            "High-quality audio · On",
+            DeviceCommand::SetHighQualityAudio(true),
+        ),
+        (
+            "High-quality audio · Off",
+            DeviceCommand::SetHighQualityAudio(false),
+        ),
+        (
+            "Dual connection · On",
+            DeviceCommand::SetDualConnection(true),
+        ),
+        (
+            "Dual connection · Off",
+            DeviceCommand::SetDualConnection(false),
+        ),
     ] {
         let button = command_button(label, command, commands);
         writes.push(button.clone().upcast());
         sound.append(&button);
     }
-    sound.append(&unsupported(
-        "High-quality audio",
-        "No verified B171 write command is available.",
-    ));
-    sound.append(&unsupported(
-        "Dual connection",
-        "Read/write payloads are not verified for this firmware.",
-    ));
     page.append(&sound);
     let find = section(
         "FIND EARBUDS",

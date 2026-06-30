@@ -9,9 +9,9 @@ This project is independent and is not affiliated with Nothing Technology Limite
 - Direct BlueZ discovery using the vendor service UUID, paired state, and a model query; no name or address-prefix matching.
 - CRC16-framed channel-15 session with activation, synchronization, partial/multiple-frame parsing, acknowledgements, readback, timeouts, and bounded recovery. RFCOMM readiness is verified before the first write; a confirmed stale `ENOTCONN` link triggers one rate-limited BlueZ reconnect repair.
 - Live battery, wear, firmware, ANC, EQ, gestures, Bass Enhance, in-ear detection, and low-lag state.
-- Confirmed B171 writes for ANC, preset and three-band EQ, gesture mapping, Bass Enhance, in-ear detection, low-lag mode, find earbuds, and the ear-tip fit test.
+- Confirmed B171 writes for ANC, preset and three-band EQ, gesture mapping, Bass Enhance, in-ear detection, low-lag mode, high-quality audio, dual connection, find earbuds, and the ear-tip fit test.
 - Local advanced-EQ editor and profiles. The current verified protocol only enables the device's advanced-EQ mode; gain/Q transmission stays gated until its B171 payload is independently confirmed.
-- Unsupported dual-connection and high-quality-audio writes are visibly disabled. Unknown models never receive write commands.
+- Unknown models never receive write commands.
 - XDG configuration, atomic writes, up to 20 JSON EQ profiles, opt-in autostart, and redacted diagnostics.
 
 Firmware flashing, factory reset, Mimi/Hearing ID enrollment, and cloud services are intentionally excluded.

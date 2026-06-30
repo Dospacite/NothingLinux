@@ -7,7 +7,7 @@ mod style;
 use crate::ui_state;
 use adw::prelude::*;
 use components::battery_text;
-use navigation::{mobile_navigation, navigation, set_navigation_width};
+use navigation::bottom_navigation;
 use nothing_core::{
     AppConfig, DeviceCapabilities, DeviceCommand, DeviceEvent, DeviceSnapshot, Paths,
 };
@@ -63,6 +63,12 @@ impl Shell {
                 DeviceEvent::BassEnhance(value) => snapshot.bass_enhance = *value,
                 DeviceEvent::InEarDetection(value) => snapshot.in_ear_detection = Some(*value),
                 DeviceEvent::LowLag(value) => snapshot.low_lag = Some(*value),
+                DeviceEvent::HighQualityAudio(value) => {
+                    snapshot.high_quality_audio = Some(*value);
+                }
+                DeviceEvent::DualConnection(value) => {
+                    snapshot.dual_connection = Some(*value);
+                }
                 DeviceEvent::Firmware(value) => snapshot.firmware = Some(value.clone()),
                 _ => {}
             }
@@ -120,14 +126,15 @@ pub fn build(
     let window = adw::ApplicationWindow::builder()
         .application(app)
         .title("Nothing Linux")
-        .default_width(1080)
-        .default_height(760)
+        .default_width(440)
+        .default_height(780)
         .width_request(390)
         .height_request(560)
         .build();
+    window.set_resizable(false);
     let toolbar = adw::ToolbarView::new();
     let header = adw::HeaderBar::new();
-    header.set_title_widget(Some(&artwork::dot_heading()));
+    header.set_title_widget(Some(&artwork::logo_label()));
     let status = gtk::Label::builder()
         .label("Disconnected")
         .css_classes(["status-pill"])
@@ -142,8 +149,6 @@ pub fn build(
 
     let toast = adw::ToastOverlay::new();
     let layout = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    let content = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    layout.append(&content);
     toast.set_child(Some(&layout));
     toolbar.set_content(Some(&toast));
     window.set_content(Some(&toolbar));
@@ -152,34 +157,8 @@ pub fn build(
         .vexpand(true)
         .transition_type(gtk::StackTransitionType::Crossfade)
         .build();
-    let sidebar = navigation(&stack);
-    let separator = gtk::Separator::new(gtk::Orientation::Vertical);
-    let mobile_navigation = mobile_navigation(&stack);
-    mobile_navigation.set_visible(false);
-    content.append(&sidebar);
-    content.append(&separator);
-    content.append(&stack);
-    layout.append(&mobile_navigation);
-    if let Ok(condition) = adw::BreakpointCondition::parse("max-width: 700px") {
-        let breakpoint = adw::Breakpoint::new(condition);
-        let hidden = false.to_value();
-        let shown = true.to_value();
-        breakpoint.add_setter(&sidebar, "visible", Some(&hidden));
-        breakpoint.add_setter(&separator, "visible", Some(&hidden));
-        breakpoint.add_setter(&mobile_navigation, "visible", Some(&shown));
-        window.add_breakpoint(breakpoint);
-    }
-    let responsive_sidebar = sidebar.clone();
-    let responsive_separator = separator.clone();
-    let responsive_mobile = mobile_navigation.clone();
-    window.connect_notify_local(Some("width"), move |window, _| {
-        set_navigation_width(
-            window.width(),
-            &responsive_sidebar,
-            &responsive_separator,
-            &responsive_mobile,
-        );
-    });
+    layout.append(&stack);
+    layout.append(&bottom_navigation(&stack));
 
     let snapshot = Rc::new(RefCell::new(DeviceSnapshot::default()));
     let mut write_widgets = Vec::new();

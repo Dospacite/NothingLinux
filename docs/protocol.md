@@ -33,6 +33,8 @@ The session queries protocol version (`c001`), activates (`f001`), reads remote 
 | Three-band custom EQ | `c044` | `f041` |
 | Advanced EQ enabled | `c04c` | `f04f` |
 | Bass Enhance | `c04e` | `f051` |
+| High-quality audio | `c050` | `f01d` |
+| Dual connection | `c052` | `f052` |
 | Find earbud | — | `f002` |
 | Ear-tip fit test | — | `f014` / `e00d` |
 

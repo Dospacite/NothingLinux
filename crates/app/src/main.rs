@@ -34,6 +34,7 @@ fn main() -> glib::ExitCode {
         None,
     );
     app.connect_startup(|app| {
+        gtk::Window::set_default_icon_name(APP_ID);
         let quit = gio::ActionEntry::builder("quit")
             .activate(|app: &adw::Application, _, _| app.quit())
             .build();

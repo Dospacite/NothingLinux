@@ -192,6 +192,8 @@ async fn send_sync_queries<T: FrameTransport>(
         DeviceCommand::QueryLowLag,
         DeviceCommand::QueryBassEnhance,
         DeviceCommand::QueryAdvancedEq,
+        DeviceCommand::QueryHighQualityAudio,
+        DeviceCommand::QueryDualConnection,
     ];
     for query in queries {
         send_command(transport, &query, sequence).await?;
@@ -243,6 +245,8 @@ fn is_mutation(command: &DeviceCommand) -> bool {
             | DeviceCommand::QueryLowLag
             | DeviceCommand::QueryBassEnhance
             | DeviceCommand::QueryAdvancedEq
+            | DeviceCommand::QueryHighQualityAudio
+            | DeviceCommand::QueryDualConnection
     )
 }
 
@@ -256,6 +260,8 @@ fn confirmation_query(command: &DeviceCommand) -> Option<DeviceCommand> {
         DeviceCommand::SetBassEnhance(_) => Some(DeviceCommand::QueryBassEnhance),
         DeviceCommand::SetInEarDetection(_) => Some(DeviceCommand::QueryInEarDetection),
         DeviceCommand::SetLowLag(_) => Some(DeviceCommand::QueryLowLag),
+        DeviceCommand::SetHighQualityAudio(_) => Some(DeviceCommand::QueryHighQualityAudio),
+        DeviceCommand::SetDualConnection(_) => Some(DeviceCommand::QueryDualConnection),
         _ => None,
     }
 }
@@ -274,6 +280,8 @@ fn apply_event(snapshot: &mut DeviceSnapshot, event: &DeviceEvent) {
         DeviceEvent::BassEnhance(value) => snapshot.bass_enhance = *value,
         DeviceEvent::InEarDetection(value) => snapshot.in_ear_detection = Some(*value),
         DeviceEvent::LowLag(value) => snapshot.low_lag = Some(*value),
+        DeviceEvent::HighQualityAudio(value) => snapshot.high_quality_audio = Some(*value),
+        DeviceEvent::DualConnection(value) => snapshot.dual_connection = Some(*value),
         DeviceEvent::Firmware(value) => snapshot.firmware = Some(value.clone()),
         DeviceEvent::ConnectionChanged(value) => snapshot.connection = *value,
         _ => {}
@@ -356,7 +364,11 @@ mod tests {
                     command::QUERY_LOW_LAG => (0x4041, vec![2]),
                     command::QUERY_BASS => (0x404e, vec![1, 6]),
                     command::QUERY_ADVANCED_EQ => (0x404c, vec![0]),
+                    command::QUERY_HIGH_QUALITY_AUDIO => (0x4050, vec![1]),
+                    command::QUERY_DUAL_CONNECTION => (0x4052, vec![1]),
                     command::SET_ANC => (0x700f, vec![]),
+                    command::SET_HIGH_QUALITY_AUDIO => (0x701d, vec![]),
+                    command::SET_DUAL_CONNECTION => (0x7052, vec![]),
                     _ => continue,
                 };
                 let response = Frame::new(id, frame.sequence, payload)

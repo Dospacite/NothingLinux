@@ -53,8 +53,8 @@ impl DeviceCapabilities {
             bass_enhance: true,
             in_ear_detection: true,
             low_lag: true,
-            high_quality_audio: false,
-            dual_connection: false,
+            high_quality_audio: true,
+            dual_connection: true,
             find_buds: true,
             fit_test: true,
         }
@@ -248,6 +248,8 @@ pub struct DeviceSnapshot {
     pub bass_enhance: Option<u8>,
     pub in_ear_detection: Option<bool>,
     pub low_lag: Option<bool>,
+    pub high_quality_audio: Option<bool>,
+    pub dual_connection: Option<bool>,
     pub firmware: Option<String>,
     pub model: Option<String>,
 }
@@ -266,6 +268,8 @@ impl Default for DeviceSnapshot {
             bass_enhance: None,
             in_ear_detection: None,
             low_lag: None,
+            high_quality_audio: None,
+            dual_connection: None,
             firmware: None,
             model: None,
         }
@@ -285,6 +289,8 @@ pub enum DeviceCommand {
     QueryLowLag,
     QueryBassEnhance,
     QueryAdvancedEq,
+    QueryHighQualityAudio,
+    QueryDualConnection,
     SetAnc {
         mode: AncMode,
         level: AncLevel,
@@ -326,6 +332,8 @@ pub enum DeviceEvent {
     BassEnhance(Option<u8>),
     InEarDetection(bool),
     LowLag(bool),
+    HighQualityAudio(bool),
+    DualConnection(bool),
     Firmware(String),
     FitTestResult {
         left_ok: bool,

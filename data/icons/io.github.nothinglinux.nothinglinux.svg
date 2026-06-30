@@ -1,10 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
   <rect x="4" y="4" width="120" height="120" rx="30" fill="#181818"/>
-  <g fill="#f5f5f2">
-    <circle cx="32" cy="40" r="5"/><circle cx="48" cy="40" r="5"/><circle cx="64" cy="40" r="5"/><circle cx="80" cy="40" r="5"/><circle cx="96" cy="40" r="5"/>
-    <circle cx="32" cy="56" r="5"/><circle cx="96" cy="56" r="5"/>
-    <circle cx="32" cy="72" r="5"/><circle cx="64" cy="72" r="5"/><circle cx="96" cy="72" r="5"/>
-    <circle cx="32" cy="88" r="5"/><circle cx="96" cy="88" r="5"/>
-  </g>
-  <circle cx="64" cy="88" r="6" fill="#e31b23"/>
+  <text x="64" y="77" text-anchor="middle"
+        font-family="Inter, Cantarell, Arial, sans-serif"
+        font-size="42" font-weight="800" letter-spacing="2"
+        fill="#e61a1f">NXL</text>
 </svg>

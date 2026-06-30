@@ -18,6 +18,8 @@ pub mod command {
     pub const QUERY_CUSTOM_EQ: u16 = 0xc044;
     pub const QUERY_ADVANCED_EQ: u16 = 0xc04c;
     pub const QUERY_BASS: u16 = 0xc04e;
+    pub const QUERY_HIGH_QUALITY_AUDIO: u16 = 0xc050;
+    pub const QUERY_DUAL_CONNECTION: u16 = 0xc052;
     pub const ACTIVATE: u16 = 0xf001;
     pub const FIND_BUD: u16 = 0xf002;
     pub const SET_GESTURE: u16 = 0xf003;
@@ -28,7 +30,9 @@ pub mod command {
     pub const SET_LOW_LAG: u16 = 0xf040;
     pub const SET_CUSTOM_EQ: u16 = 0xf041;
     pub const SET_ADVANCED_EQ: u16 = 0xf04f;
+    pub const SET_HIGH_QUALITY_AUDIO: u16 = 0xf01d;
     pub const SET_BASS: u16 = 0xf051;
+    pub const SET_DUAL_CONNECTION: u16 = 0xf052;
     pub const EVENT_BATTERY: u16 = 0xe001;
     pub const EVENT_WEAR: u16 = 0xe002;
     pub const EVENT_ANC: u16 = 0xe003;
@@ -49,6 +53,8 @@ pub fn encode_command(command_value: &DeviceCommand, sequence: u8) -> Result<Fra
         C::QueryLowLag => (command::QUERY_LOW_LAG, vec![]),
         C::QueryBassEnhance => (command::QUERY_BASS, vec![]),
         C::QueryAdvancedEq => (command::QUERY_ADVANCED_EQ, vec![]),
+        C::QueryHighQualityAudio => (command::QUERY_HIGH_QUALITY_AUDIO, vec![]),
+        C::QueryDualConnection => (command::QUERY_DUAL_CONNECTION, vec![]),
         C::SetAnc { mode, level } => (command::SET_ANC, vec![1, anc_wire(*mode, *level), 0]),
         C::SetEqPreset(preset) => (command::SET_EQ, vec![preset_wire(*preset)?, 0]),
         C::SetCustomEq(gains) => (command::SET_CUSTOM_EQ, encode_custom_eq(*gains)?),
@@ -89,15 +95,9 @@ pub fn encode_command(command_value: &DeviceCommand, sequence: u8) -> Result<Fra
         ),
         C::StartFitTest => (command::START_FIT_TEST, vec![1]),
         C::CancelFitTest => (command::START_FIT_TEST, vec![0]),
-        C::SetDualConnection(_) => {
-            return Err(ProtocolError::UnsupportedCommand(
-                "dual connection is not verified for B171",
-            ));
-        }
-        C::SetHighQualityAudio(_) => {
-            return Err(ProtocolError::UnsupportedCommand(
-                "high-quality audio is not verified for B171",
-            ));
+        C::SetDualConnection(enabled) => (command::SET_DUAL_CONNECTION, vec![u8::from(*enabled)]),
+        C::SetHighQualityAudio(enabled) => {
+            (command::SET_HIGH_QUALITY_AUDIO, vec![u8::from(*enabled), 0])
         }
     };
     Frame::new(id, sequence, payload)
@@ -189,7 +189,7 @@ pub fn decode_event(frame: &Frame) -> Result<Option<DeviceEvent>, ProtocolError>
         command::QUERY_BATTERY | command::EVENT_BATTERY => {
             DeviceEvent::Battery(parse_battery(payload)?)
         }
-        command::QUERY_WEAR => DeviceEvent::Wear(parse_wear(payload)?),
+        command::QUERY_WEAR | command::EVENT_WEAR => DeviceEvent::Wear(parse_wear(payload)?),
         command::QUERY_ANC | command::EVENT_ANC => {
             let (mode, level) = parse_anc(payload)?;
             DeviceEvent::Anc { mode, level }
@@ -215,7 +215,10 @@ pub fn decode_event(frame: &Frame) -> Result<Option<DeviceEvent>, ProtocolError>
             let level = *payload.get(1).ok_or(ProtocolError::MalformedResponse(id))? / 2;
             DeviceEvent::BassEnhance(enabled.then_some(level))
         }
-        command::EVENT_WEAR => return Ok(None),
+        command::QUERY_HIGH_QUALITY_AUDIO => {
+            DeviceEvent::HighQualityAudio(parse_bool(payload, id)?)
+        }
+        command::QUERY_DUAL_CONNECTION => DeviceEvent::DualConnection(parse_bool(payload, id)?),
         command::EVENT_FIT_TEST => DeviceEvent::FitTestResult {
             left_ok: *payload
                 .first()
@@ -231,7 +234,9 @@ pub fn decode_event(frame: &Frame) -> Result<Option<DeviceEvent>, ProtocolError>
         | command::SET_LOW_LAG
         | command::SET_CUSTOM_EQ
         | command::SET_ADVANCED_EQ
+        | command::SET_HIGH_QUALITY_AUDIO
         | command::SET_BASS
+        | command::SET_DUAL_CONNECTION
         | command::FIND_BUD
         | command::START_FIT_TEST => DeviceEvent::Acknowledged {
             sequence: frame.sequence,
@@ -240,6 +245,13 @@ pub fn decode_event(frame: &Frame) -> Result<Option<DeviceEvent>, ProtocolError>
         _ => return Ok(None),
     };
     Ok(Some(event))
+}
+
+fn parse_bool(payload: &[u8], command_id: u16) -> Result<bool, ProtocolError> {
+    Ok(*payload
+        .first()
+        .ok_or(ProtocolError::MalformedResponse(command_id))?
+        != 0)
 }
 
 fn parse_battery(payload: &[u8]) -> Result<BatteryState, ProtocolError> {
@@ -419,6 +431,8 @@ mod tests {
             DeviceCommand::QueryLowLag,
             DeviceCommand::QueryBassEnhance,
             DeviceCommand::QueryAdvancedEq,
+            DeviceCommand::QueryHighQualityAudio,
+            DeviceCommand::QueryDualConnection,
             DeviceCommand::SetAnc {
                 mode: AncMode::NoiseCancellation,
                 level: AncLevel::Adaptive,
@@ -429,6 +443,8 @@ mod tests {
             DeviceCommand::SetBassEnhance(Some(5)),
             DeviceCommand::SetInEarDetection(true),
             DeviceCommand::SetLowLag(false),
+            DeviceCommand::SetHighQualityAudio(true),
+            DeviceCommand::SetDualConnection(true),
             DeviceCommand::FindBud {
                 side: EarbudSide::Left,
                 ringing: true,
@@ -459,6 +475,31 @@ mod tests {
             panic!("wrong event")
         };
         assert_eq!(map.len(), 2);
+    }
+
+    #[test]
+    fn parses_live_wear_event() {
+        let wear =
+            Frame::new(0xe002, 3, vec![2, 2, 0x80, 3, 0x84]).unwrap_or_else(|e| panic!("{e}"));
+        let Some(DeviceEvent::Wear(state)) = decode_event(&wear).unwrap_or_else(|e| panic!("{e}"))
+        else {
+            panic!("wrong event")
+        };
+        assert!(!state.left);
+        assert!(state.right);
+    }
+
+    #[test]
+    fn encodes_high_quality_and_dual_connection_controls() {
+        let high_quality = encode_command(&DeviceCommand::SetHighQualityAudio(true), 7)
+            .unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(high_quality.command, command::SET_HIGH_QUALITY_AUDIO);
+        assert_eq!(high_quality.payload, [1, 0]);
+
+        let dual_connection = encode_command(&DeviceCommand::SetDualConnection(false), 8)
+            .unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(dual_connection.command, command::SET_DUAL_CONNECTION);
+        assert_eq!(dual_connection.payload, [0]);
     }
 
     #[test]
