@@ -2,37 +2,51 @@
 
 ## Install
 
-Nothing Linux currently supports **Nothing Ear (2024), model B171**, on Linux. There is not yet a packaged `.deb`, Flatpak, or AppImage, so the installer builds the application once and installs it for your user account.
+Nothing Linux currently supports **Nothing Ear (2024), model B171**, on 64-bit Linux.
 
 ### Linux Mint 22 / Ubuntu 24.04
 
-1. Install the required system packages:
+1. Download the latest `nothing-linux_VERSION_amd64.deb` from the [Releases page](https://github.com/Dospacite/NothingLinux/releases).
+2. Open a terminal in the download folder and install it:
 
    ```sh
-   sudo apt update
-   sudo apt install -y build-essential pkg-config libgtk-4-dev libadwaita-1-dev libdbus-1-dev libbluetooth-dev desktop-file-utils appstream git curl
+   sudo apt install ./nothing-linux_*_amd64.deb
    ```
 
-2. Install Rust using the official installer:
+3. Open **Nothing Linux** from the application menu.
 
-   ```sh
-   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-   source "$HOME/.cargo/env"
-   ```
+### AppImage
 
-   Choose the default installation when prompted.
+The AppImage is useful when you do not want to install a system package:
 
-3. Download and install Nothing Linux:
+```sh
+chmod +x nothing-linux_*_amd64.AppImage
+./nothing-linux_*_amd64.AppImage
+```
 
-   ```sh
-   git clone https://github.com/Dospacite/NothingLinux.git
-   cd NothingLinux
-   cargo run -p xtask -- install-user
-   ```
+### Fedora
 
-4. Open **Nothing Linux** from the application menu. If it does not appear immediately, sign out and back in once.
+Download the latest `nothing-linux-VERSION-1.x86_64.rpm` from the [Releases page](https://github.com/Dospacite/NothingLinux/releases), then install it with:
 
-The application and launcher are installed under `~/.local`; administrator access is not used after the system packages are installed.
+```sh
+sudo dnf install ./nothing-linux-*.x86_64.rpm
+```
+
+### Install From Source
+
+Install the build dependencies and Rust, clone this repository, then run the current-user installer:
+
+```sh
+sudo apt update
+sudo apt install -y build-essential pkg-config libgtk-4-dev libadwaita-1-dev libdbus-1-dev libbluetooth-dev desktop-file-utils appstream git curl
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source "$HOME/.cargo/env"
+git clone https://github.com/Dospacite/NothingLinux.git
+cd NothingLinux
+cargo run -p xtask -- install-user
+```
+
+The source installer places the application under `~/.local` for the current user.
 
 ## First Use
 
@@ -96,6 +110,13 @@ This project is independent and is not affiliated with Nothing Technology Limite
 
 ## Update or Remove
 
+Install a newer DEB or RPM with the same `apt install` or `dnf install` command used above. To remove a system package while keeping local settings and EQ profiles:
+
+```sh
+sudo apt remove nothing-linux
+# Fedora: sudo dnf remove nothing-linux
+```
+
 To update an existing source installation:
 
 ```sh
@@ -104,7 +125,7 @@ git pull
 cargo run -p xtask -- install-user
 ```
 
-To remove the application while keeping local settings and EQ profiles:
+To remove a source installation:
 
 ```sh
 cd NothingLinux
