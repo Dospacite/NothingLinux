@@ -125,7 +125,7 @@ fn build_application(app: &adw::Application, background: bool) {
     let shell = ui::build(app, command_tx.clone(), config.clone(), paths.clone());
     let event_shell = shell.clone();
     let weak_app = app.downgrade();
-    glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
+    glib::timeout_add_local(std::time::Duration::from_millis(16), move || {
         for event in event_rx.try_iter() {
             if let (Some(handle), DeviceEvent::Battery(battery)) = (&tray_handle, &event) {
                 handle.update(|tray| tray.set_battery(battery));
@@ -175,12 +175,12 @@ fn start_backend(events: mpsc::Sender<DeviceEvent>, commands: mpsc::Receiver<Dev
             let _ = events.send(DeviceEvent::ConnectionChanged(
                 nothing_core::ConnectionState::Connecting,
             ));
-            let session = match bluer_session().await { Ok(value) => value, Err(reason) => { let _ = events.send(DeviceEvent::CommandFailed { command: DeviceCommand::QueryBattery, reason }); return; } };
+            let session = match bluer_session().await { Ok(value) => value, Err(reason) => { let _ = events.send(DeviceEvent::CommandFailed { sequence: None, command: DeviceCommand::QueryBattery, reason }); return; } };
             let mut controller = nothing_core::Controller::spawn_managed(session.device);
             loop {
                 tokio::select! {
                     event = controller.events.recv() => { match event { Some(event) => { if events.send(event).is_err() { break; } }, None => break } }
-                    _ = tokio::time::sleep(std::time::Duration::from_millis(50)) => {
+                    _ = tokio::time::sleep(std::time::Duration::from_millis(5)) => {
                         while let Ok(command) = commands.try_recv() { if controller.handle.send(command).await.is_err() { break; } }
                     }
                 }
@@ -200,10 +200,10 @@ async fn bluer_session() -> Result<SelectedDevice, String> {
         .default_adapter()
         .await
         .map_err(|error| format!("No Bluetooth adapter: {error}"))?;
-    let device = wait_for_vendor_device(&adapter)
+    let descriptor = wait_for_vendor_device(&adapter)
         .await
         .map_err(|error| error.to_string())?;
-    let address = device
+    let address = descriptor
         .address
         .parse()
         .map_err(|_| "BlueZ returned an invalid Bluetooth address".to_owned())?;

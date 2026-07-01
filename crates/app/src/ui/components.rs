@@ -1,5 +1,4 @@
 use adw::prelude::*;
-use gtk::glib;
 use nothing_core::{ChargeLevel, DeviceCommand, Gesture};
 use std::sync::mpsc;
 
@@ -95,13 +94,8 @@ pub(super) fn command_button(
     let button = gtk::Button::with_label(label);
     button.set_hexpand(true);
     let sender = sender.clone();
-    button.connect_clicked(move |button| {
-        button.set_sensitive(false);
+    button.connect_clicked(move |_| {
         let _ = sender.send(command.clone());
-        let button = button.clone();
-        glib::timeout_add_local_once(std::time::Duration::from_secs(1), move || {
-            button.set_sensitive(true)
-        });
     });
     button
 }

@@ -1,7 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
-  <rect x="4" y="4" width="120" height="120" rx="30" fill="#181818"/>
-  <text x="64" y="77" text-anchor="middle"
+  <text x="64" y="78" text-anchor="middle"
         font-family="Inter, Cantarell, Arial, sans-serif"
-        font-size="42" font-weight="800" letter-spacing="2"
+        font-size="48" font-weight="800" letter-spacing="3"
         fill="#e61a1f">NXL</text>
 </svg>

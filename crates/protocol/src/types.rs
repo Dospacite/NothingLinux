@@ -20,6 +20,15 @@ impl DeviceDescriptor {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DualConnectionDevice {
+    pub address: String,
+    pub address_bytes: [u8; 6],
+    pub name: String,
+    pub connected: bool,
+    pub owner_device: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeviceCapabilities {
     pub model: String,
     pub anc: bool,
@@ -175,6 +184,16 @@ impl AdvancedEqProfile {
     pub const FREQUENCIES: [f32; 8] = [
         55.0, 110.0, 220.0, 440.0, 1_320.0, 3_300.0, 6_600.0, 13_200.0,
     ];
+    pub const FREQUENCY_RANGES: [(f32, f32); 8] = [
+        (20.0, 99.0),
+        (100.0, 199.0),
+        (200.0, 399.0),
+        (400.0, 999.0),
+        (1_000.0, 2_999.0),
+        (3_000.0, 5_999.0),
+        (6_000.0, 11_999.0),
+        (12_000.0, 20_000.0),
+    ];
     pub fn validate(&self) -> Result<(), ProtocolError> {
         if self.name.trim().is_empty() || self.name.chars().count() > 48 {
             return Err(ProtocolError::InvalidValue("profile name"));
@@ -183,13 +202,13 @@ impl AdvancedEqProfile {
             return Err(ProtocolError::InvalidValue("advanced EQ band count"));
         }
         for (index, band) in self.bands.iter().enumerate() {
+            let (min_frequency, max_frequency) = Self::FREQUENCY_RANGES[index];
             if !band.frequency_hz.is_finite()
                 || !band.gain_db.is_finite()
                 || !band.q.is_finite()
-                || !(20.0..=20_000.0).contains(&band.frequency_hz)
+                || !(min_frequency..=max_frequency).contains(&band.frequency_hz)
                 || !(-12.0..=12.0).contains(&band.gain_db)
                 || !(0.1..=10.0).contains(&band.q)
-                || (band.frequency_hz - Self::FREQUENCIES[index]).abs() > f32::EPSILON
             {
                 return Err(ProtocolError::InvalidValue("advanced EQ band"));
             }
@@ -260,6 +279,7 @@ pub struct DeviceSnapshot {
     pub low_lag: Option<bool>,
     pub audio_codec: Option<AudioCodec>,
     pub dual_connection: Option<bool>,
+    pub dual_devices: Vec<DualConnectionDevice>,
     pub firmware: Option<String>,
     pub model: Option<String>,
 }
@@ -282,6 +302,7 @@ impl Default for DeviceSnapshot {
             low_lag: None,
             audio_codec: None,
             dual_connection: None,
+            dual_devices: Vec::new(),
             firmware: None,
             model: None,
         }
@@ -305,6 +326,9 @@ pub enum DeviceCommand {
     QueryAdvancedEq,
     QueryAudioCodec,
     QueryDualConnection,
+    QueryDualConnectionDevices {
+        page: u16,
+    },
     SetAnc {
         mode: AncMode,
         level: AncLevel,
@@ -328,6 +352,10 @@ pub enum DeviceCommand {
     StartFitTest,
     CancelFitTest,
     SetDualConnection(bool),
+    SetDualConnectionDevice {
+        connect: bool,
+        address: [u8; 6],
+    },
     SetAudioCodec(AudioCodec),
 }
 
@@ -351,6 +379,18 @@ pub enum DeviceEvent {
     LowLag(bool),
     AudioCodec(AudioCodec),
     DualConnection(bool),
+    DualConnectionDevicePage {
+        total: u8,
+        current: u8,
+        devices: Vec<DualConnectionDevice>,
+    },
+    DualConnectionDevices(Vec<DualConnectionDevice>),
+    DualConnectionDeviceChanged {
+        connected: bool,
+        address: String,
+        need_update: bool,
+    },
+    DualConnectionSwitchChanged,
     Firmware(String),
     FitTestResult {
         left_ok: bool,
@@ -360,7 +400,16 @@ pub enum DeviceEvent {
         sequence: u8,
         command: u16,
     },
+    CommandStarted {
+        sequence: u8,
+        command: DeviceCommand,
+    },
+    CommandConfirmed {
+        sequence: u8,
+        command: DeviceCommand,
+    },
     CommandFailed {
+        sequence: Option<u8>,
         command: DeviceCommand,
         reason: String,
     },

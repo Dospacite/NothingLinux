@@ -1,7 +1,7 @@
-use super::{COMMAND_TIMEOUT, FrameTransport, SessionError};
+use super::{COMMAND_TIMEOUT, FrameTransport, SessionError, WRITE_CONFIRMATION_TIMEOUT};
 use nothing_protocol::{
-    BatteryState, ConnectionState, DeviceCommand, DeviceEvent, DeviceSnapshot, Frame, FrameDecoder,
-    command, decode_event, encode_command,
+    BatteryState, ConnectionState, DeviceCommand, DeviceEvent, DeviceSnapshot,
+    DualConnectionDevice, Frame, FrameDecoder, command, decode_event, encode_command,
 };
 use std::{collections::HashMap, time::Duration};
 use tokio::{
@@ -13,6 +13,8 @@ struct Pending {
     command: DeviceCommand,
     deadline: Instant,
 }
+
+const WEAR_POLL_INTERVAL: Duration = Duration::from_millis(750);
 
 pub async fn run_session<T: FrameTransport>(
     transport: &mut T,
@@ -26,16 +28,19 @@ pub async fn run_session<T: FrameTransport>(
         ..DeviceSnapshot::default()
     };
     let mut pending = HashMap::<u8, Pending>::new();
+    let mut confirmations = HashMap::<u8, u8>::new();
     let mut supported = false;
     let mut sync_started = false;
     let activation_deadline = Instant::now() + COMMAND_TIMEOUT;
     let mut identification_deadline = None;
     let mut low_battery = LowBatteryCycles::default();
+    let mut dual_pages = DualConnectionPages::default();
     events
         .send(DeviceEvent::ConnectionChanged(ConnectionState::Activating))
         .ok();
     send_raw(transport, command::QUERY_PROTOCOL, &[], &mut sequence).await?;
-    let mut timeout_tick = interval(Duration::from_millis(200));
+    let mut timeout_tick = interval(Duration::from_millis(50));
+    let mut wear_poll = interval(WEAR_POLL_INTERVAL);
     let mut buffer = [0_u8; 1024];
 
     loop {
@@ -73,18 +78,98 @@ pub async fn run_session<T: FrameTransport>(
                         }
                         continue;
                     }
-                    if let Some(event) = decode_event(&frame)? {
+                    if let Some(mut event) = decode_event(&frame)? {
+                        let confirmation_for = confirmations.remove(&frame.sequence);
                         if let DeviceEvent::Acknowledged { sequence: ack_sequence, .. } = &event
-                            && let Some(pending_command) = pending.remove(ack_sequence)
-                            && let Some(query) = confirmation_query(&pending_command.command)
+                            && let Some(pending_command) = pending.get(ack_sequence)
                         {
-                            send_command(transport, &query, &mut sequence).await?;
+                            if let Some(query) = confirmation_query(&pending_command.command) {
+                                let query_sequence =
+                                    send_command(transport, &query, &mut sequence).await?;
+                                confirmations.insert(query_sequence, *ack_sequence);
+                            } else if let Some(completed) = pending.remove(ack_sequence) {
+                                events
+                                    .send(DeviceEvent::CommandConfirmed {
+                                        sequence: *ack_sequence,
+                                        command: completed.command,
+                                    })
+                                    .ok();
+                            }
+                        }
+                        if let DeviceEvent::DualConnectionDevicePage {
+                            total,
+                            current,
+                            devices,
+                        } = &event
+                        {
+                            let total = *total;
+                            let current = *current;
+                            dual_pages.push(total, current, devices.clone());
+                            if current.saturating_add(1) < total {
+                                send_command(
+                                    transport,
+                                    &DeviceCommand::QueryDualConnectionDevices {
+                                        page: u16::from(current) + 1,
+                                    },
+                                    &mut sequence,
+                                )
+                                .await?;
+                                continue;
+                            }
+                            event = DeviceEvent::DualConnectionDevices(dual_pages.take());
+                        }
+                        if matches!(event, DeviceEvent::DualConnection(true)) {
+                            send_command(
+                                transport,
+                                &DeviceCommand::QueryDualConnectionDevices { page: 0 },
+                                &mut sequence,
+                            )
+                            .await?;
+                        } else if matches!(event, DeviceEvent::DualConnection(false)) {
+                            dual_pages.clear();
+                            let devices = DeviceEvent::DualConnectionDevices(Vec::new());
+                            apply_event(&mut snapshot, &devices);
+                            events.send(devices).ok();
+                        } else if matches!(
+                            event,
+                            DeviceEvent::DualConnectionSwitchChanged
+                                | DeviceEvent::DualConnectionDeviceChanged { .. }
+                        ) {
+                            send_command(transport, &DeviceCommand::QueryDualConnection, &mut sequence)
+                                .await?;
+                            send_command(
+                                transport,
+                                &DeviceCommand::QueryDualConnectionDevices { page: 0 },
+                                &mut sequence,
+                            )
+                            .await?;
                         }
                         apply_event(&mut snapshot, &event);
                         if let DeviceEvent::Battery(state) = &event {
                             low_battery.update(state);
                         }
                         events.send(event).ok();
+                        if let Some(sequence) = confirmation_for
+                            && let Some(completed) = pending.remove(&sequence)
+                        {
+                            if event_confirms_command(&completed.command, &snapshot) {
+                                events
+                                    .send(DeviceEvent::CommandConfirmed {
+                                        sequence,
+                                        command: completed.command,
+                                    })
+                                    .ok();
+                            } else {
+                                events
+                                    .send(DeviceEvent::CommandFailed {
+                                        sequence: Some(sequence),
+                                        command: completed.command,
+                                        reason: "The earbuds returned a different value; the change was undone"
+                                            .into(),
+                                    })
+                                    .ok();
+                            }
+                        }
                     }
                 }
             }
@@ -92,6 +177,7 @@ pub async fn run_session<T: FrameTransport>(
                 let command_value = maybe_command.ok_or(SessionError::CommandsClosed)?;
                 if is_mutation(&command_value) && !supported {
                     events.send(DeviceEvent::CommandFailed {
+                        sequence: None,
                         command: command_value,
                         reason: "Writes are blocked until the device identifies as B171".into(),
                     }).ok();
@@ -101,16 +187,47 @@ pub async fn run_session<T: FrameTransport>(
                 let frame = encode_command(&command_value, command_sequence);
                 match frame {
                     Ok(frame) => {
-                        transport.write_all(&frame.encode()?).await?;
                         if is_mutation(&command_value) {
+                            let superseded: Vec<u8> = pending
+                                .iter()
+                                .filter_map(|(sequence, pending)| {
+                                    same_mutation_target(&pending.command, &command_value)
+                                        .then_some(*sequence)
+                                })
+                                .collect();
+                            for sequence in superseded {
+                                if let Some(completed) = pending.remove(&sequence) {
+                                    confirmations.retain(|_, mutation| *mutation != sequence);
+                                    events
+                                        .send(DeviceEvent::CommandConfirmed {
+                                            sequence,
+                                            command: completed.command,
+                                        })
+                                        .ok();
+                                }
+                            }
                             pending.insert(command_sequence, Pending {
-                                command: command_value,
-                                deadline: Instant::now() + COMMAND_TIMEOUT,
+                                command: command_value.clone(),
+                                deadline: Instant::now() + WRITE_CONFIRMATION_TIMEOUT,
                             });
+                            events.send(DeviceEvent::CommandStarted {
+                                sequence: command_sequence,
+                                command: command_value.clone(),
+                            }).ok();
+                        }
+                        if let Err(error) = transport.write_all(&frame.encode()?).await {
+                            pending.remove(&command_sequence);
+                            events.send(DeviceEvent::CommandFailed {
+                                sequence: Some(command_sequence),
+                                command: command_value,
+                                reason: error.to_string(),
+                            }).ok();
+                            return Err(error);
                         }
                     }
                     Err(error) => {
                         events.send(DeviceEvent::CommandFailed {
+                            sequence: None,
                             command: command_value,
                             reason: error.to_string(),
                         }).ok();
@@ -133,12 +250,17 @@ pub async fn run_session<T: FrameTransport>(
                     .collect();
                 for sequence in expired {
                     if let Some(value) = pending.remove(&sequence) {
+                        confirmations.retain(|_, mutation| *mutation != sequence);
                         events.send(DeviceEvent::CommandFailed {
+                            sequence: Some(sequence),
                             command: value.command,
-                            reason: "The earbuds did not acknowledge the change; the previous value was kept".into(),
+                            reason: "The earbuds did not confirm the change within 3 seconds; the change was undone".into(),
                         }).ok();
                     }
                 }
+            }
+            _ = wear_poll.tick(), if supported => {
+                send_command(transport, &DeviceCommand::QueryWear, &mut sequence).await?;
             }
         }
     }
@@ -171,9 +293,13 @@ async fn send_command<T: FrameTransport>(
     transport: &mut T,
     command_value: &DeviceCommand,
     sequence: &mut u8,
-) -> Result<(), SessionError> {
-    let frame = encode_command(command_value, next_sequence(sequence))?;
-    transport.write_all(&frame.encode()?).await
+) -> Result<u8, SessionError> {
+    let command_sequence = next_sequence(sequence);
+    let frame = encode_command(command_value, command_sequence)?;
+    transport
+        .write_all(&frame.encode()?)
+        .await
+        .map(|()| command_sequence)
 }
 
 async fn send_sync_queries<T: FrameTransport>(
@@ -251,6 +377,7 @@ fn is_mutation(command: &DeviceCommand) -> bool {
             | DeviceCommand::QueryAdvancedEq
             | DeviceCommand::QueryAudioCodec
             | DeviceCommand::QueryDualConnection
+            | DeviceCommand::QueryDualConnectionDevices { .. }
     )
 }
 
@@ -267,8 +394,91 @@ fn confirmation_query(command: &DeviceCommand) -> Option<DeviceCommand> {
         DeviceCommand::SetLowLag(_) => Some(DeviceCommand::QueryLowLag),
         DeviceCommand::SetAudioCodec(_) => Some(DeviceCommand::QueryAudioCodec),
         DeviceCommand::SetDualConnection(_) => Some(DeviceCommand::QueryDualConnection),
+        DeviceCommand::SetDualConnectionDevice { .. } => None,
         _ => None,
     }
+}
+
+fn same_mutation_target(left: &DeviceCommand, right: &DeviceCommand) -> bool {
+    match (left, right) {
+        (DeviceCommand::SetAnc { .. }, DeviceCommand::SetAnc { .. })
+        | (DeviceCommand::SetEqPreset(_), DeviceCommand::SetEqPreset(_))
+        | (DeviceCommand::SetCustomEq(_), DeviceCommand::SetCustomEq(_))
+        | (DeviceCommand::SetAdvancedEqEnabled(_), DeviceCommand::SetAdvancedEqEnabled(_))
+        | (DeviceCommand::SetAdvancedEqProfile(_), DeviceCommand::SetAdvancedEqProfile(_))
+        | (DeviceCommand::SetBassEnhance(_), DeviceCommand::SetBassEnhance(_))
+        | (DeviceCommand::SetInEarDetection(_), DeviceCommand::SetInEarDetection(_))
+        | (DeviceCommand::SetLowLag(_), DeviceCommand::SetLowLag(_))
+        | (DeviceCommand::SetDualConnection(_), DeviceCommand::SetDualConnection(_))
+        | (DeviceCommand::SetAudioCodec(_), DeviceCommand::SetAudioCodec(_)) => true,
+        (
+            DeviceCommand::SetGesture {
+                side: left_side,
+                gesture: left_gesture,
+                ..
+            },
+            DeviceCommand::SetGesture {
+                side: right_side,
+                gesture: right_gesture,
+                ..
+            },
+        ) => left_side == right_side && left_gesture == right_gesture,
+        (
+            DeviceCommand::SetDualConnectionDevice {
+                address: left_address,
+                ..
+            },
+            DeviceCommand::SetDualConnectionDevice {
+                address: right_address,
+                ..
+            },
+        ) => left_address == right_address,
+        _ => false,
+    }
+}
+
+fn event_confirms_command(command: &DeviceCommand, snapshot: &DeviceSnapshot) -> bool {
+    match command {
+        DeviceCommand::SetAnc { mode, level } => {
+            snapshot.anc_mode == *mode && snapshot.anc_level == *level
+        }
+        DeviceCommand::SetEqPreset(value) => snapshot.eq_preset == *value,
+        DeviceCommand::SetCustomEq(value) => float_arrays_match(&snapshot.custom_eq, value),
+        DeviceCommand::SetAdvancedEqEnabled(value) => snapshot.advanced_eq_enabled == Some(*value),
+        DeviceCommand::SetAdvancedEqProfile(value) => snapshot
+            .advanced_eq_profile
+            .as_ref()
+            .is_some_and(|actual| profiles_match(actual, value)),
+        DeviceCommand::SetGesture {
+            side,
+            gesture,
+            action,
+        } => snapshot.gestures.get(&(*side, *gesture)) == Some(action),
+        DeviceCommand::SetBassEnhance(value) => snapshot.bass_enhance == *value,
+        DeviceCommand::SetInEarDetection(value) => snapshot.in_ear_detection == Some(*value),
+        DeviceCommand::SetLowLag(value) => snapshot.low_lag == Some(*value),
+        DeviceCommand::SetDualConnection(value) => snapshot.dual_connection == Some(*value),
+        DeviceCommand::SetAudioCodec(value) => snapshot.audio_codec == Some(*value),
+        _ => true,
+    }
+}
+
+fn float_arrays_match<const N: usize>(left: &[f32; N], right: &[f32; N]) -> bool {
+    left.iter()
+        .zip(right)
+        .all(|(left, right)| (left - right).abs() < 0.01)
+}
+
+fn profiles_match(
+    left: &nothing_protocol::AdvancedEqProfile,
+    right: &nothing_protocol::AdvancedEqProfile,
+) -> bool {
+    left.bands.len() == right.bands.len()
+        && left.bands.iter().zip(&right.bands).all(|(left, right)| {
+            (left.frequency_hz - right.frequency_hz).abs() < 0.01
+                && (left.gain_db - right.gain_db).abs() < 0.01
+                && (left.q - right.q).abs() < 0.01
+        })
 }
 
 fn apply_event(snapshot: &mut DeviceSnapshot, event: &DeviceEvent) {
@@ -289,9 +499,46 @@ fn apply_event(snapshot: &mut DeviceSnapshot, event: &DeviceEvent) {
         DeviceEvent::LowLag(value) => snapshot.low_lag = Some(*value),
         DeviceEvent::AudioCodec(value) => snapshot.audio_codec = Some(*value),
         DeviceEvent::DualConnection(value) => snapshot.dual_connection = Some(*value),
+        DeviceEvent::DualConnectionDevices(value) => snapshot.dual_devices = value.clone(),
         DeviceEvent::Firmware(value) => snapshot.firmware = Some(value.clone()),
         DeviceEvent::ConnectionChanged(value) => snapshot.connection = *value,
         _ => {}
+    }
+}
+
+#[derive(Default)]
+struct DualConnectionPages {
+    total: u8,
+    devices: Vec<DualConnectionDevice>,
+}
+
+impl DualConnectionPages {
+    fn push(&mut self, total: u8, current: u8, devices: Vec<DualConnectionDevice>) {
+        if current == 0 || self.total != total {
+            self.total = total;
+            self.devices.clear();
+        }
+        let mut connected = Vec::new();
+        let mut disconnected = Vec::new();
+        for device in devices {
+            if device.connected {
+                connected.push(device);
+            } else {
+                disconnected.push(device);
+            }
+        }
+        self.devices.extend(connected);
+        self.devices.extend(disconnected);
+    }
+
+    fn take(&mut self) -> Vec<DualConnectionDevice> {
+        self.total = 0;
+        std::mem::take(&mut self.devices)
+    }
+
+    fn clear(&mut self) {
+        self.total = 0;
+        self.devices.clear();
     }
 }
 
@@ -426,7 +673,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn activation_sync_and_acknowledged_write() {
+    async fn activation_sync_live_wear_and_confirmed_write() {
         let (host, device) = duplex(4096);
         tokio::spawn(respond(device));
         let mut transport = TestTransport(host);
@@ -448,6 +695,16 @@ mod tests {
         })
         .await;
         assert!(ready.is_ok());
+        let live_wear = tokio::time::timeout(Duration::from_secs(2), async {
+            let mut updates = 0;
+            while updates < 2 {
+                if matches!(event_rx.recv().await, Some(DeviceEvent::Wear(_))) {
+                    updates += 1;
+                }
+            }
+        })
+        .await;
+        assert!(live_wear.is_ok());
         command_tx
             .send(DeviceCommand::SetAnc {
                 mode: nothing_protocol::AncMode::Off,
@@ -455,21 +712,24 @@ mod tests {
             })
             .await
             .unwrap_or_else(|e| panic!("{e}"));
-        let ack = tokio::time::timeout(Duration::from_secs(2), async {
+        let confirmed = tokio::time::timeout(Duration::from_secs(2), async {
+            let mut started = false;
             loop {
-                if matches!(
-                    event_rx.recv().await,
-                    Some(DeviceEvent::Acknowledged {
-                        command: command::SET_ANC,
+                match event_rx.recv().await {
+                    Some(DeviceEvent::CommandStarted {
+                        command: DeviceCommand::SetAnc { .. },
                         ..
-                    })
-                ) {
-                    break;
+                    }) => started = true,
+                    Some(DeviceEvent::CommandConfirmed {
+                        command: DeviceCommand::SetAnc { .. },
+                        ..
+                    }) => break started,
+                    _ => {}
                 }
             }
         })
         .await;
-        assert!(ack.is_ok());
+        assert_eq!(confirmed, Ok(true));
         task.abort();
     }
 
@@ -494,5 +754,17 @@ mod tests {
             confirmation_query(&DeviceCommand::SetCustomEq([0.0; 3])),
             Some(DeviceCommand::QueryCustomEq)
         );
+    }
+
+    #[test]
+    fn rapid_writes_supersede_only_the_same_setting() {
+        assert!(same_mutation_target(
+            &DeviceCommand::SetBassEnhance(Some(2)),
+            &DeviceCommand::SetBassEnhance(Some(5)),
+        ));
+        assert!(!same_mutation_target(
+            &DeviceCommand::SetBassEnhance(Some(2)),
+            &DeviceCommand::SetInEarDetection(true),
+        ));
     }
 }

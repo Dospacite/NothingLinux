@@ -1,7 +1,7 @@
 use crate::{
     AdvancedEqProfile, AncLevel, AncMode, AudioCodec, BatteryState, ChargeLevel, DeviceCommand,
-    DeviceEvent, EarbudSide, EqBand, EqPreset, Frame, Gesture, GestureAction, ProtocolError,
-    WearState,
+    DeviceEvent, DualConnectionDevice, EarbudSide, EqBand, EqPreset, Frame, Gesture, GestureAction,
+    ProtocolError, WearState,
 };
 use std::collections::BTreeMap;
 
@@ -22,6 +22,7 @@ pub mod command {
     pub const QUERY_BASS: u16 = 0xc04e;
     pub const QUERY_AUDIO_CODEC: u16 = 0xc029;
     pub const QUERY_DUAL_CONNECTION: u16 = 0xc027;
+    pub const QUERY_DUAL_CONNECTION_DEVICES: u16 = 0xc028;
     pub const ACTIVATE: u16 = 0xf001;
     pub const FIND_BUD: u16 = 0xf002;
     pub const SET_GESTURE: u16 = 0xf003;
@@ -36,10 +37,13 @@ pub mod command {
     pub const SET_AUDIO_CODEC: u16 = 0xf01c;
     pub const SET_BASS: u16 = 0xf051;
     pub const SET_DUAL_CONNECTION: u16 = 0xf01a;
+    pub const SET_DUAL_CONNECTION_DEVICE: u16 = 0xf01b;
     pub const EVENT_BATTERY: u16 = 0xe001;
     pub const EVENT_WEAR: u16 = 0xe002;
     pub const EVENT_ANC: u16 = 0xe003;
+    pub const EVENT_DUAL_CONNECTION_SWITCH: u16 = 0xe006;
     pub const EVENT_FIT_TEST: u16 = 0xe00d;
+    pub const EVENT_DUAL_CONNECTION_DEVICE: u16 = 0xe00e;
 }
 
 pub fn encode_command(command_value: &DeviceCommand, sequence: u8) -> Result<Frame, ProtocolError> {
@@ -60,6 +64,10 @@ pub fn encode_command(command_value: &DeviceCommand, sequence: u8) -> Result<Fra
         C::QueryAdvancedEq => (command::QUERY_ADVANCED_EQ, vec![]),
         C::QueryAudioCodec => (command::QUERY_AUDIO_CODEC, vec![]),
         C::QueryDualConnection => (command::QUERY_DUAL_CONNECTION, vec![]),
+        C::QueryDualConnectionDevices { page } => (
+            command::QUERY_DUAL_CONNECTION_DEVICES,
+            page.to_le_bytes().to_vec(),
+        ),
         C::SetAnc { mode, level } => (command::SET_ANC, vec![1, anc_wire(*mode, *level), 0]),
         C::SetEqPreset(preset) => (command::SET_EQ, vec![preset_wire(*preset)?]),
         C::SetCustomEq(gains) => (command::SET_CUSTOM_EQ, encode_custom_eq(*gains)?),
@@ -105,6 +113,12 @@ pub fn encode_command(command_value: &DeviceCommand, sequence: u8) -> Result<Fra
         C::StartFitTest => (command::START_FIT_TEST, vec![1]),
         C::CancelFitTest => (command::START_FIT_TEST, vec![0]),
         C::SetDualConnection(enabled) => (command::SET_DUAL_CONNECTION, vec![u8::from(*enabled)]),
+        C::SetDualConnectionDevice { connect, address } => {
+            let mut payload = Vec::with_capacity(7);
+            payload.push(u8::from(*connect));
+            payload.extend_from_slice(address);
+            (command::SET_DUAL_CONNECTION_DEVICE, payload)
+        }
         C::SetAudioCodec(codec) => (command::SET_AUDIO_CODEC, vec![codec_wire(*codec)]),
     };
     Frame::new(id, sequence, payload)
@@ -256,6 +270,24 @@ pub fn decode_event(frame: &Frame) -> Result<Option<DeviceEvent>, ProtocolError>
         }
         command::QUERY_AUDIO_CODEC => DeviceEvent::AudioCodec(parse_audio_codec(payload, id)?),
         command::QUERY_DUAL_CONNECTION => DeviceEvent::DualConnection(parse_bool(payload, id)?),
+        command::QUERY_DUAL_CONNECTION_DEVICES => {
+            let (total, current, devices) = parse_dual_connection_devices(payload, id)?;
+            DeviceEvent::DualConnectionDevicePage {
+                total,
+                current,
+                devices,
+            }
+        }
+        command::EVENT_DUAL_CONNECTION_SWITCH => DeviceEvent::DualConnectionSwitchChanged,
+        command::EVENT_DUAL_CONNECTION_DEVICE => {
+            let (connected, address, need_update) =
+                parse_dual_connection_device_event(payload, id)?;
+            DeviceEvent::DualConnectionDeviceChanged {
+                connected,
+                address,
+                need_update,
+            }
+        }
         command::EVENT_FIT_TEST => DeviceEvent::FitTestResult {
             left_ok: *payload
                 .first()
@@ -275,6 +307,7 @@ pub fn decode_event(frame: &Frame) -> Result<Option<DeviceEvent>, ProtocolError>
         | command::SET_AUDIO_CODEC
         | command::SET_BASS
         | command::SET_DUAL_CONNECTION
+        | command::SET_DUAL_CONNECTION_DEVICE
         | command::FIND_BUD
         | command::START_FIT_TEST => DeviceEvent::Acknowledged {
             sequence: frame.sequence,
@@ -283,6 +316,91 @@ pub fn decode_event(frame: &Frame) -> Result<Option<DeviceEvent>, ProtocolError>
         _ => return Ok(None),
     };
     Ok(Some(event))
+}
+
+fn parse_dual_connection_devices(
+    payload: &[u8],
+    command_id: u16,
+) -> Result<(u8, u8, Vec<DualConnectionDevice>), ProtocolError> {
+    if payload.len() <= 3 {
+        return Ok((
+            payload.first().copied().unwrap_or(0),
+            payload.get(1).copied().unwrap_or(0),
+            Vec::new(),
+        ));
+    }
+    let total = payload[0];
+    let current = payload[1];
+    let device_count = usize::from(payload[2]);
+    let mut index = 3_usize;
+    let mut devices = Vec::with_capacity(device_count);
+
+    while devices.len() < device_count && index < payload.len() {
+        let flags = payload[index];
+        let connected = flags & 0x0f == 1;
+        let owner_device = (flags & 0xf0) >> 4 == 1;
+        let address_start = index + 1;
+        let address_end = address_start + 6;
+        let address_slice = payload
+            .get(address_start..address_end)
+            .ok_or(ProtocolError::MalformedResponse(command_id))?;
+        let mut address_bytes = [0_u8; 6];
+        address_bytes.copy_from_slice(address_slice);
+        let length_byte = *payload
+            .get(address_end)
+            .ok_or(ProtocolError::MalformedResponse(command_id))?;
+        let clipped_name = length_byte & 0x80 != 0;
+        let name_len = if clipped_name {
+            0x1f
+        } else {
+            usize::from(length_byte & 0x7f)
+        };
+        index += 8;
+        let name = if let Some(name_bytes) = payload.get(index..index + name_len) {
+            let mut name = String::from_utf8_lossy(name_bytes).replace('\u{fffd}', "");
+            if clipped_name {
+                name.push_str("...");
+            }
+            name
+        } else {
+            "empty name".into()
+        };
+        index = index.saturating_add(name_len);
+        devices.push(DualConnectionDevice {
+            address: format_mac(&address_bytes),
+            address_bytes,
+            name,
+            connected,
+            owner_device,
+        });
+    }
+
+    Ok((total, current, devices))
+}
+
+fn parse_dual_connection_device_event(
+    payload: &[u8],
+    command_id: u16,
+) -> Result<(bool, String, bool), ProtocolError> {
+    let connected = *payload
+        .first()
+        .ok_or(ProtocolError::MalformedResponse(command_id))?
+        == 1;
+    let address = payload
+        .get(1..7)
+        .ok_or(ProtocolError::MalformedResponse(command_id))?;
+    let mut address_bytes = [0_u8; 6];
+    address_bytes.copy_from_slice(address);
+    let need_update = payload.get(7).copied().unwrap_or(0) == 1;
+    Ok((connected, format_mac(&address_bytes), need_update))
+}
+
+fn format_mac(address: &[u8; 6]) -> String {
+    address
+        .iter()
+        .map(|byte| format!("{:02X}", *byte))
+        .collect::<Vec<_>>()
+        .join(":")
 }
 
 fn parse_bool(payload: &[u8], command_id: u16) -> Result<bool, ProtocolError> {
@@ -525,6 +643,7 @@ mod tests {
             DeviceCommand::QueryAdvancedEq,
             DeviceCommand::QueryAudioCodec,
             DeviceCommand::QueryDualConnection,
+            DeviceCommand::QueryDualConnectionDevices { page: 0 },
             DeviceCommand::SetAnc {
                 mode: AncMode::NoiseCancellation,
                 level: AncLevel::Adaptive,
@@ -537,6 +656,10 @@ mod tests {
             DeviceCommand::SetLowLag(false),
             DeviceCommand::SetAudioCodec(AudioCodec::Ldac),
             DeviceCommand::SetDualConnection(true),
+            DeviceCommand::SetDualConnectionDevice {
+                connect: true,
+                address: [1, 2, 3, 4, 5, 6],
+            },
             DeviceCommand::FindBud {
                 side: EarbudSide::Left,
                 ringing: true,
@@ -592,6 +715,53 @@ mod tests {
             .unwrap_or_else(|e| panic!("{e}"));
         assert_eq!(dual_connection.command, command::SET_DUAL_CONNECTION);
         assert_eq!(dual_connection.payload, [0]);
+
+        let dual_devices =
+            encode_command(&DeviceCommand::QueryDualConnectionDevices { page: 1 }, 9)
+                .unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(dual_devices.command, command::QUERY_DUAL_CONNECTION_DEVICES);
+        assert_eq!(dual_devices.payload, [1, 0]);
+
+        let connect_device = encode_command(
+            &DeviceCommand::SetDualConnectionDevice {
+                connect: true,
+                address: [0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff],
+            },
+            10,
+        )
+        .unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(connect_device.command, command::SET_DUAL_CONNECTION_DEVICE);
+        assert_eq!(
+            connect_device.payload,
+            [1, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff]
+        );
+    }
+
+    #[test]
+    fn parses_dual_connection_device_list() {
+        let mut payload = vec![1, 0, 2, 0x11, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 6];
+        payload.extend_from_slice(b"Laptop");
+        payload.extend_from_slice(&[0x00, 1, 2, 3, 4, 5, 6, 5]);
+        payload.extend_from_slice(b"Phone");
+        let frame = Frame::new(command::QUERY_DUAL_CONNECTION_DEVICES, 11, payload)
+            .unwrap_or_else(|e| panic!("{e}"));
+        let Some(DeviceEvent::DualConnectionDevicePage {
+            total,
+            current,
+            devices,
+        }) = decode_event(&frame).unwrap_or_else(|e| panic!("{e}"))
+        else {
+            panic!("wrong event")
+        };
+        assert_eq!(total, 1);
+        assert_eq!(current, 0);
+        assert_eq!(devices.len(), 2);
+        assert!(devices[0].connected);
+        assert!(devices[0].owner_device);
+        assert_eq!(devices[0].address, "AA:BB:CC:DD:EE:FF");
+        assert_eq!(devices[0].name, "Laptop");
+        assert!(!devices[1].connected);
+        assert_eq!(devices[1].name, "Phone");
     }
 
     #[test]

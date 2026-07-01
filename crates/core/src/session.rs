@@ -10,6 +10,7 @@ pub use runner::run_session;
 pub use transport::{FrameTransport, RfcommTransport};
 
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(4);
+const WRITE_CONFIRMATION_TIMEOUT: Duration = Duration::from_secs(3);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(8);
 const SOCKET_READY_TIMEOUT: Duration = Duration::from_secs(2);
 const REPAIR_COOLDOWN: Duration = Duration::from_secs(30);
