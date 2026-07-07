@@ -17,8 +17,13 @@ use std::{
 use tracing_subscriber::EnvFilter;
 
 const APP_ID: &str = "io.github.nothinglinux.nothinglinux";
+#[cfg(target_os = "linux")]
+const DEFAULT_GSK_RENDERER: &str = "cairo";
+#[cfg(target_os = "linux")]
+const RENDERER_REEXEC_MARKER: &str = "NOTHING_LINUX_GSK_RENDERER_DEFAULTED";
 
 fn main() -> glib::ExitCode {
+    ensure_stable_renderer();
     init_logging();
     let background = std::env::args().any(|argument| argument == "--background");
     let app = adw::Application::builder()
@@ -58,6 +63,31 @@ fn main() -> glib::ExitCode {
     });
     app.run()
 }
+
+#[cfg(target_os = "linux")]
+fn ensure_stable_renderer() {
+    if std::env::var_os("GSK_RENDERER").is_some()
+        || std::env::var_os(RENDERER_REEXEC_MARKER).is_some()
+    {
+        return;
+    }
+
+    let Ok(executable) = std::env::current_exe() else {
+        return;
+    };
+
+    // GTK 4's GL renderers can segfault during the first frame on some drivers.
+    use std::os::unix::process::CommandExt;
+    let error = std::process::Command::new(executable)
+        .args(std::env::args_os().skip(1))
+        .env("GSK_RENDERER", DEFAULT_GSK_RENDERER)
+        .env(RENDERER_REEXEC_MARKER, "1")
+        .exec();
+    eprintln!("failed to restart with GSK_RENDERER={DEFAULT_GSK_RENDERER}: {error}");
+}
+
+#[cfg(not(target_os = "linux"))]
+fn ensure_stable_renderer() {}
 
 fn init_logging() {
     let filter = EnvFilter::try_from_default_env()
