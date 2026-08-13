@@ -4,3 +4,4 @@
 /.vscode/
 *.log
 *.apk
+packaging/aur/*.tar.gz
