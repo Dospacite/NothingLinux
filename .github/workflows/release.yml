@@ -92,6 +92,15 @@ jobs:
           test -s dist/*.AppImage.zsync
           readelf --string-dump=.upd_info dist/*.AppImage | grep -F \
             'gh-releases-zsync|Dospacite|NothingLinux|latest|nothing-linux_*_amd64.AppImage.zsync'
+          inspect_dir="$(mktemp -d)"
+          (
+            cd "$inspect_dir"
+            "$GITHUB_WORKSPACE"/dist/*.AppImage --appimage-extract >/dev/null
+            test "$(readlink squashfs-root/.DirIcon)" = \
+              'usr/share/icons/hicolor/256x256/apps/io.github.nothinglinux.nothinglinux.png'
+            file --dereference squashfs-root/.DirIcon | grep -F 'PNG image data'
+          )
+          rm -rf "$inspect_dir"
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v7

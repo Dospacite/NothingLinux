@@ -132,6 +132,12 @@ readonly OUTPUT="$LDAI_OUTPUT"
     --icon-file "$PACKAGE_ROOT/usr/share/icons/hicolor/256x256/apps/$APP_ID.png" \
     --plugin gtk
 
+# Gear Lever reads .DirIcon before themed icon locations. linuxdeploy creates
+# that link from the desktop icon name, which can select the scalable SVG even
+# when the PNG was supplied above. Keep the root link explicitly PNG so the
+# copied desktop-integration icon has a reliable file type and extension.
+ln -sfn "usr/share/icons/hicolor/256x256/apps/$APP_ID.png" "$PACKAGE_ROOT/.DirIcon"
+
 # Nothing Linux does not use GTK's optional GStreamer media backend. The GTK
 # plugin can bundle a host-built copy whose GLib ABI does not match the bundled
 # runtime, producing a startup loader error even though no media is used.
