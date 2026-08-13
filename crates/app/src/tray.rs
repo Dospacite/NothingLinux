@@ -1,7 +1,11 @@
 use ksni::Icon;
 use ksni::blocking::{Handle, TrayMethods};
 use nothing_core::{BatteryState, ChargeLevel};
-use std::sync::mpsc;
+use std::{
+    env,
+    path::{Path, PathBuf},
+    sync::mpsc,
+};
 
 const NXL_RED: [u8; 3] = [0xe6, 0x1a, 0x1f];
 
@@ -40,6 +44,11 @@ impl ksni::Tray for TrayItem {
     }
     fn icon_name(&self) -> String {
         "io.github.nothinglinux.nothinglinux".into()
+    }
+    fn icon_theme_path(&self) -> String {
+        installed_icon_theme_path()
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_default()
     }
     fn icon_pixmap(&self) -> Vec<Icon> {
         vec![nxl_tray_icon()]
@@ -101,46 +110,43 @@ fn percent(level: Option<ChargeLevel>) -> String {
     level.map_or_else(|| "—".into(), |level| format!("{}%", level.percent))
 }
 
+fn installed_icon_theme_path() -> Option<PathBuf> {
+    let app_dir = env::var_os("APPDIR").map(PathBuf::from);
+    let executable = env::current_exe().ok();
+    icon_theme_path_candidates(app_dir.as_deref(), executable.as_deref())
+        .into_iter()
+        .find(|path| path.join("hicolor").is_dir())
+}
+
+fn icon_theme_path_candidates(app_dir: Option<&Path>, executable: Option<&Path>) -> Vec<PathBuf> {
+    let mut candidates = Vec::with_capacity(2);
+    if let Some(app_dir) = app_dir {
+        candidates.push(app_dir.join("usr/share/icons"));
+    }
+    if let Some(usr_dir) = executable
+        .and_then(Path::parent)
+        .filter(|bin_dir| bin_dir.file_name().is_some_and(|name| name == "bin"))
+        .and_then(Path::parent)
+    {
+        candidates.push(usr_dir.join("share/icons"));
+    }
+    candidates
+}
+
 fn nxl_tray_icon() -> Icon {
     const SIZE: usize = 64;
-    const GLYPHS: [&[&str]; 3] = [
-        &[
-            "10001", "11001", "10101", "10011", "10001", "10001", "10001",
-        ],
-        &[
-            "10001", "01010", "00100", "00100", "01010", "10001", "10001",
-        ],
-        &[
-            "10000", "10000", "10000", "10000", "10000", "10000", "11111",
-        ],
-    ];
-    let cell_width = 3;
-    let cell_height = 7;
-    let gap = 3;
-    let glyph_width = 5 * cell_width;
-    let glyph_height = 7 * cell_height;
-    let text_width = glyph_width * GLYPHS.len() + gap * (GLYPHS.len() - 1);
-    let start_x = (SIZE - text_width) / 2;
-    let start_y = (SIZE - glyph_height) / 2;
     let mut data = vec![0; SIZE * SIZE * 4];
-    for (glyph_index, glyph) in GLYPHS.iter().enumerate() {
-        let glyph_x = start_x + glyph_index * (glyph_width + gap);
-        for (row, pattern) in glyph.iter().enumerate() {
-            for (column, value) in pattern.bytes().enumerate() {
-                if value != b'1' {
-                    continue;
-                }
-                let block_x = glyph_x + column * cell_width;
-                let block_y = start_y + row * cell_height;
-                for y in block_y..block_y + cell_height {
-                    for x in block_x..block_x + cell_width {
-                        let offset = (y * SIZE + x) * 4;
-                        data[offset] = 0xff;
-                        data[offset + 1] = NXL_RED[0];
-                        data[offset + 2] = NXL_RED[1];
-                        data[offset + 3] = NXL_RED[2];
-                    }
-                }
+    for y in 0..SIZE {
+        for x in 0..SIZE {
+            let offset = (y * SIZE + x) * 4;
+            data[offset..offset + 4].copy_from_slice(&[0xff, NXL_RED[0], NXL_RED[1], NXL_RED[2]]);
+
+            let diagonal_x = 18 + (y.saturating_sub(14) * 25 / 36);
+            let is_n = (15..=22).contains(&x)
+                || (42..=49).contains(&x)
+                || ((14..=50).contains(&y) && x.abs_diff(diagonal_x) <= 3);
+            if is_n {
+                data[offset..offset + 4].copy_from_slice(&[0xff, 0xff, 0xff, 0xff]);
             }
         }
     }
@@ -159,4 +165,34 @@ pub fn start() -> (Option<Handle<TrayItem>>, mpsc::Receiver<TrayAction>) {
     };
     let handle = item.assume_sni_available(true).spawn().ok();
     (handle, receiver)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn appimage_icon_theme_path_precedes_the_system_path() {
+        let candidates = icon_theme_path_candidates(
+            Some(Path::new("/tmp/AppDir")),
+            Some(Path::new("/usr/bin/nothing-linux")),
+        );
+        assert_eq!(
+            candidates,
+            vec![
+                PathBuf::from("/tmp/AppDir/usr/share/icons"),
+                PathBuf::from("/usr/share/icons"),
+            ]
+        );
+    }
+
+    #[test]
+    fn tray_fallback_is_a_full_argb_icon() {
+        let icon = nxl_tray_icon();
+        assert_eq!((icon.width, icon.height), (64, 64));
+        assert_eq!(icon.data.len(), 64 * 64 * 4);
+        assert_eq!(&icon.data[..4], &[0xff, NXL_RED[0], NXL_RED[1], NXL_RED[2]]);
+        let centre = ((32 * 64 + 32) * 4)..((32 * 64 + 32) * 4 + 4);
+        assert_eq!(&icon.data[centre], &[0xff, 0xff, 0xff, 0xff]);
+    }
 }
