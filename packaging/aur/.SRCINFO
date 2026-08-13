@@ -1,0 +1,18 @@
+pkgbase = nothing-linux
+	pkgdesc = Local desktop controller for Nothing Ear (2024) earbuds
+	pkgver = 0.1.2
+	pkgrel = 1
+	url = https://github.com/Dospacite/NothingLinux
+	arch = x86_64
+	license = GPL-3.0-or-later
+	makedepends = cargo
+	makedepends = pkgconf
+	makedepends = rust
+	depends = bluez
+	depends = dbus
+	depends = gtk4>=4.14
+	depends = libadwaita>=1.5
+	source = nothing-linux-0.1.2.tar.gz::https://github.com/Dospacite/NothingLinux/archive/refs/tags/v0.1.2.tar.gz
+	sha256sums = ea1ce523d0c6ce253f29dbec8b4a712788e0c734fb4a633af23c23e60ca6f99d
+
+pkgname = nothing-linux

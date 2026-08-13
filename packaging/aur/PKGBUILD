@@ -1,0 +1,55 @@
+# Maintainer: Nothing Linux contributors <https://github.com/Dospacite/NothingLinux>
+
+pkgname=nothing-linux
+pkgver=0.1.2
+pkgrel=1
+pkgdesc='Local desktop controller for Nothing Ear (2024) earbuds'
+arch=('x86_64')
+url='https://github.com/Dospacite/NothingLinux'
+license=('GPL-3.0-or-later')
+depends=(
+  'bluez'
+  'dbus'
+  'gtk4>=4.14'
+  'libadwaita>=1.5'
+)
+makedepends=('cargo' 'pkgconf' 'rust')
+source=("${pkgname}-${pkgver}.tar.gz::${url}/archive/refs/tags/v${pkgver}.tar.gz")
+sha256sums=('ea1ce523d0c6ce253f29dbec8b4a712788e0c734fb4a633af23c23e60ca6f99d')
+
+prepare() {
+  cd "NothingLinux-${pkgver}"
+  cargo fetch --locked --target "${CARCH}-unknown-linux-gnu"
+}
+
+build() {
+  cd "NothingLinux-${pkgver}"
+  export CARGO_TARGET_DIR="${srcdir}/target"
+  cargo build --frozen --locked --release -p nothing-linux
+}
+
+check() {
+  cd "NothingLinux-${pkgver}"
+  export CARGO_TARGET_DIR="${srcdir}/target"
+  cargo test --frozen --locked --workspace
+}
+
+package() {
+  cd "NothingLinux-${pkgver}"
+
+  install -Dm755 "${srcdir}/target/release/nothing-linux" \
+    "${pkgdir}/usr/bin/nothing-linux"
+  install -Dm644 LICENSE \
+    "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+  install -Dm644 data/io.github.nothinglinux.nothinglinux.desktop \
+    "${pkgdir}/usr/share/applications/io.github.nothinglinux.nothinglinux.desktop"
+  install -Dm644 data/io.github.nothinglinux.nothinglinux.metainfo.xml \
+    "${pkgdir}/usr/share/metainfo/io.github.nothinglinux.nothinglinux.metainfo.xml"
+  install -Dm644 data/icons/io.github.nothinglinux.nothinglinux.svg \
+    "${pkgdir}/usr/share/icons/hicolor/scalable/apps/io.github.nothinglinux.nothinglinux.svg"
+
+  for size in 48 64 128 256; do
+    install -Dm644 "data/icons/hicolor/${size}x${size}/apps/io.github.nothinglinux.nothinglinux.png" \
+      "${pkgdir}/usr/share/icons/hicolor/${size}x${size}/apps/io.github.nothinglinux.nothinglinux.png"
+  done
+}
