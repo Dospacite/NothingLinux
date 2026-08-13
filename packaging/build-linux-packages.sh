@@ -20,6 +20,8 @@ readonly WORK_DIR="$(mktemp -d)"
 readonly PACKAGE_ROOT="$WORK_DIR/package-root"
 readonly TOOLS_DIR="$WORK_DIR/tools"
 
+cd "$WORKSPACE"
+
 cleanup() {
     rm -rf "$WORK_DIR"
 }
@@ -116,11 +118,12 @@ chmod +x "$LINUXDEPLOY" "$GTK_PLUGIN"
 export APPIMAGE_EXTRACT_AND_RUN=1
 export DEPLOY_GTK_VERSION=4
 export LINUXDEPLOY_PLUGIN_GTK="$GTK_PLUGIN"
-export OUTPUT="$DIST/${PACKAGE_NAME}_${VERSION}_${DEB_ARCH}.AppImage"
+export LDAI_OUTPUT="$DIST/${PACKAGE_NAME}_${VERSION}_${DEB_ARCH}.AppImage"
 # Keep the update channel with the release assets themselves. linuxdeploy
 # passes this to appimagetool, which embeds it in the AppImage and writes the
 # matching zsync control file next to the generated artifact.
-export UPDATE_INFORMATION="$APPIMAGE_UPDATE_INFORMATION"
+export LDAI_UPDATE_INFORMATION="$APPIMAGE_UPDATE_INFORMATION"
+readonly OUTPUT="$LDAI_OUTPUT"
 
 "$LINUXDEPLOY" \
     --appdir "$PACKAGE_ROOT" \
@@ -131,6 +134,10 @@ export UPDATE_INFORMATION="$APPIMAGE_UPDATE_INFORMATION"
     --output appimage
 
 chmod +x "$OUTPUT"
+readonly GENERATED_ZSYNC="$WORKSPACE/$(basename "$OUTPUT").zsync"
+if [[ -s "$GENERATED_ZSYNC" ]]; then
+    mv "$GENERATED_ZSYNC" "$OUTPUT.zsync"
+fi
 [[ -s "$OUTPUT.zsync" ]] || {
     printf 'AppImage update metadata was not generated: %s\n' "$OUTPUT.zsync" >&2
     exit 1
