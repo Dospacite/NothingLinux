@@ -15,6 +15,7 @@
   <provides><binary>nothing-linux</binary></provides>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="0.1.4" date="2026-08-14"><description><p>Use a PNG root icon in the AppImage so desktop launchers and Gear Lever integrations display it reliably.</p></description></release>
     <release version="0.1.3" date="2026-08-13"><description><p>Fix the AppImage startup crash and remove an unused incompatible media module from the portable bundle.</p></description></release>
     <release version="0.1.2" date="2026-08-13"><description><p>Improved Hyprland window behavior, Bluetooth discovery and reconnection, status visibility, equalizer preset graphs, and AppImage integration and updates.</p></description></release>
     <release version="0.1.1" date="2026-08-13"><description><p>Maintenance release.</p></description></release>

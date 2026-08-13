@@ -129,7 +129,7 @@ readonly OUTPUT="$LDAI_OUTPUT"
     --appdir "$PACKAGE_ROOT" \
     --executable "$PACKAGE_ROOT/usr/bin/nothing-linux" \
     --desktop-file "$PACKAGE_ROOT/usr/share/applications/$APP_ID.desktop" \
-    --icon-file "$PACKAGE_ROOT/usr/share/icons/hicolor/scalable/apps/$APP_ID.svg" \
+    --icon-file "$PACKAGE_ROOT/usr/share/icons/hicolor/256x256/apps/$APP_ID.png" \
     --plugin gtk
 
 # Nothing Linux does not use GTK's optional GStreamer media backend. The GTK
