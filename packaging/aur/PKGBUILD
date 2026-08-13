@@ -15,7 +15,7 @@ depends=(
 )
 makedepends=('cargo' 'pkgconf' 'rust')
 source=("${pkgname}-${pkgver}.tar.gz::${url}/archive/refs/tags/v${pkgver}.tar.gz")
-sha256sums=('ea1ce523d0c6ce253f29dbec8b4a712788e0c734fb4a633af23c23e60ca6f99d')
+sha256sums=('050c879c07f7fdd1bb044060738d68a991ddebbef2edb0673509bde9bb27ca78')
 
 prepare() {
   cd "NothingLinux-${pkgver}"
