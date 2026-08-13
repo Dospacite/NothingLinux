@@ -8,6 +8,7 @@ use std::{
 };
 
 const NXL_RED: [u8; 3] = [0xe6, 0x1a, 0x1f];
+const APP_ID: &str = "io.github.nothinglinux.nothinglinux";
 
 #[derive(Debug, Clone, Copy)]
 pub enum TrayAction {
@@ -43,7 +44,7 @@ impl ksni::Tray for TrayItem {
         format!("Nothing Linux — {}", self.battery)
     }
     fn icon_name(&self) -> String {
-        "io.github.nothinglinux.nothinglinux".into()
+        APP_ID.into()
     }
     fn icon_theme_path(&self) -> String {
         installed_icon_theme_path()
@@ -115,20 +116,30 @@ fn installed_icon_theme_path() -> Option<PathBuf> {
     let executable = env::current_exe().ok();
     icon_theme_path_candidates(app_dir.as_deref(), executable.as_deref())
         .into_iter()
-        .find(|path| path.join("hicolor").is_dir())
+        // QuickShell's StatusNotifier implementation treats IconThemePath as
+        // a direct base path, rather than an icon-theme directory. AppImages
+        // therefore provide an extensionless alias at their root; keeping the
+        // standard icon name lets other SNI hosts use their normal lookup.
+        .find(|path| path.join(APP_ID).is_file())
 }
 
 fn icon_theme_path_candidates(app_dir: Option<&Path>, executable: Option<&Path>) -> Vec<PathBuf> {
     let mut candidates = Vec::with_capacity(2);
     if let Some(app_dir) = app_dir {
-        candidates.push(app_dir.join("usr/share/icons"));
+        candidates.push(app_dir.to_path_buf());
     }
-    if let Some(usr_dir) = executable
+    if let Some(appimage_root) = executable
         .and_then(Path::parent)
         .filter(|bin_dir| bin_dir.file_name().is_some_and(|name| name == "bin"))
         .and_then(Path::parent)
+        .and_then(Path::parent)
     {
-        candidates.push(usr_dir.join("share/icons"));
+        if !candidates
+            .iter()
+            .any(|candidate| candidate == appimage_root)
+        {
+            candidates.push(appimage_root.to_path_buf());
+        }
     }
     candidates
 }
@@ -172,18 +183,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn appimage_icon_theme_path_precedes_the_system_path() {
+    fn appimage_icon_base_path_precedes_the_executable_path() {
         let candidates = icon_theme_path_candidates(
             Some(Path::new("/tmp/AppDir")),
-            Some(Path::new("/usr/bin/nothing-linux")),
+            Some(Path::new("/tmp/AppDir/usr/bin/nothing-linux")),
         );
-        assert_eq!(
-            candidates,
-            vec![
-                PathBuf::from("/tmp/AppDir/usr/share/icons"),
-                PathBuf::from("/usr/share/icons"),
-            ]
-        );
+        assert_eq!(candidates, vec![PathBuf::from("/tmp/AppDir")]);
     }
 
     #[test]

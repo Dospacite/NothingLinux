@@ -99,6 +99,9 @@ jobs:
             test "$(readlink squashfs-root/.DirIcon)" = \
               'usr/share/icons/hicolor/256x256/apps/io.github.nothinglinux.nothinglinux.png'
             file --dereference squashfs-root/.DirIcon | grep -F 'PNG image data'
+            test "$(readlink squashfs-root/io.github.nothinglinux.nothinglinux)" = \
+              'usr/share/icons/hicolor/256x256/apps/io.github.nothinglinux.nothinglinux.png'
+            file --dereference squashfs-root/io.github.nothinglinux.nothinglinux | grep -F 'PNG image data'
           )
           rm -rf "$inspect_dir"
 

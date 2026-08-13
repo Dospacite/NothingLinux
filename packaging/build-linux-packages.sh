@@ -138,6 +138,11 @@ readonly OUTPUT="$LDAI_OUTPUT"
 # copied desktop-integration icon has a reliable file type and extension.
 ln -sfn "usr/share/icons/hicolor/256x256/apps/$APP_ID.png" "$PACKAGE_ROOT/.DirIcon"
 
+# QuickShell's StatusNotifier implementation uses IconThemePath as a direct
+# base path. Provide an extensionless alias matching the standard IconName so
+# it can load the icon without relying on the host icon cache.
+ln -sfn "usr/share/icons/hicolor/256x256/apps/$APP_ID.png" "$PACKAGE_ROOT/$APP_ID"
+
 # Nothing Linux does not use GTK's optional GStreamer media backend. The GTK
 # plugin can bundle a host-built copy whose GLib ABI does not match the bundled
 # runtime, producing a startup loader error even though no media is used.
