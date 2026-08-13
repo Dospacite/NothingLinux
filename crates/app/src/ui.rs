@@ -31,7 +31,7 @@ impl Clone for Shell {
 }
 
 struct ShellInner {
-    pub window: adw::ApplicationWindow,
+    pub window: gtk::ApplicationWindow,
     toast: adw::ToastOverlay,
     confirmed_snapshot: RefCell<DeviceSnapshot>,
     snapshot: Rc<RefCell<DeviceSnapshot>>,
@@ -73,7 +73,7 @@ enum RefreshScope {
 }
 
 impl Shell {
-    pub fn window(&self) -> &adw::ApplicationWindow {
+    pub fn window(&self) -> &gtk::ApplicationWindow {
         &self.0.window
     }
 
@@ -349,7 +349,10 @@ pub fn build(
     paths: Option<Paths>,
 ) -> Shell {
     install_css();
-    let window = adw::ApplicationWindow::builder()
+    // AdwApplicationWindow deliberately manages its own titlebar and aborts
+    // when GtkWindow::set_titlebar is used. GtkApplicationWindow lets us use
+    // the real CSD titlebar required for normal Wayland/Hyprland dragging.
+    let window = gtk::ApplicationWindow::builder()
         .application(app)
         .title("Nothing Linux")
         .default_width(440)
@@ -384,7 +387,7 @@ pub fn build(
     let layout = gtk::Box::new(gtk::Orientation::Vertical, 0);
     toast.set_child(Some(&layout));
     toolbar.set_content(Some(&toast));
-    window.set_content(Some(&toolbar));
+    window.set_child(Some(&toolbar));
     let stack = gtk::Stack::builder()
         .hexpand(true)
         .vexpand(true)

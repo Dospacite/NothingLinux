@@ -130,7 +130,18 @@ readonly OUTPUT="$LDAI_OUTPUT"
     --executable "$PACKAGE_ROOT/usr/bin/nothing-linux" \
     --desktop-file "$PACKAGE_ROOT/usr/share/applications/$APP_ID.desktop" \
     --icon-file "$PACKAGE_ROOT/usr/share/icons/hicolor/scalable/apps/$APP_ID.svg" \
-    --plugin gtk \
+    --plugin gtk
+
+# Nothing Linux does not use GTK's optional GStreamer media backend. The GTK
+# plugin can bundle a host-built copy whose GLib ABI does not match the bundled
+# runtime, producing a startup loader error even though no media is used.
+find "$PACKAGE_ROOT/usr/lib/gtk-4.0" \
+    -path '*/media/libmedia-gstreamer.so' \
+    -type f \
+    -delete
+
+"$LINUXDEPLOY" \
+    --appdir "$PACKAGE_ROOT" \
     --output appimage
 
 chmod +x "$OUTPUT"

@@ -264,7 +264,7 @@ async fn bluer_session() -> Result<SelectedDevice, String> {
 }
 
 fn install_close_behavior(
-    window: &adw::ApplicationWindow,
+    window: &gtk::ApplicationWindow,
     config: Rc<RefCell<AppConfig>>,
     paths: Option<Paths>,
 ) {
