@@ -1,7 +1,7 @@
 # Maintainer: Nothing Linux contributors <https://github.com/Dospacite/NothingLinux>
 
 pkgname=nothing-linux
-pkgver=0.1.2
+pkgver=0.1.3
 pkgrel=1
 pkgdesc='Local desktop controller for Nothing Ear (2024) earbuds'
 arch=('x86_64')
@@ -15,7 +15,7 @@ depends=(
 )
 makedepends=('cargo' 'pkgconf' 'rust')
 source=("${pkgname}-${pkgver}.tar.gz::${url}/archive/refs/tags/v${pkgver}.tar.gz")
-sha256sums=('050c879c07f7fdd1bb044060738d68a991ddebbef2edb0673509bde9bb27ca78')
+sha256sums=('4580492406f4fab21def6b8cc0400c00c7285d1ca0c4a550223b27337968c455')
 
 prepare() {
   cd "NothingLinux-${pkgver}"
