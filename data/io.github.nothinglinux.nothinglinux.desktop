@@ -8,5 +8,4 @@ Terminal=false
 Categories=AudioVideo;Audio;GTK;
 Keywords=Nothing;Ear;earbuds;headphones;ANC;equalizer;Bluetooth;
 StartupNotify=true
-StartupWMClass=io.github.nothinglinux.nothinglinux
-
+StartupWMClass=nothing-linux
