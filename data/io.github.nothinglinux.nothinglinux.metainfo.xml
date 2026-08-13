@@ -15,6 +15,7 @@
   <provides><binary>nothing-linux</binary></provides>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="0.1.8" date="2026-08-14"><description><p>Correct the AppImage window class so Hyprland can reliably match its placement rule.</p></description></release>
     <release version="0.1.7" date="2026-08-14"><description><p>Make the AppImage tray icon self-contained for QuickShell and Caelestia sidebars.</p></description></release>
     <release version="0.1.6" date="2026-08-14"><description><p>Provide status-notifier hosts the AppImage icon theme and a complete in-band tray icon fallback.</p></description></release>
     <release version="0.1.5" date="2026-08-14"><description><p>Ensure the AppImage root icon itself is PNG for reliable Gear Lever and sidebar integration.</p></description></release>
