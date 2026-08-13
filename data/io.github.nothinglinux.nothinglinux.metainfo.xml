@@ -14,5 +14,9 @@
   <launchable type="desktop-id">io.github.nothinglinux.nothinglinux.desktop</launchable>
   <provides><binary>nothing-linux</binary></provides>
   <content_rating type="oars-1.1" />
-  <releases><release version="0.1.0" date="2026-06-30"><description><p>Initial source release focused on Nothing Ear 2024 (B171).</p></description></release></releases>
+  <releases>
+    <release version="0.1.2" date="2026-08-13"><description><p>Improved Hyprland window behavior, Bluetooth discovery and reconnection, status visibility, equalizer preset graphs, and AppImage integration and updates.</p></description></release>
+    <release version="0.1.1" date="2026-08-13"><description><p>Maintenance release.</p></description></release>
+    <release version="0.1.0" date="2026-06-30"><description><p>Initial source release focused on Nothing Ear 2024 (B171).</p></description></release>
+  </releases>
 </component>

@@ -44,7 +44,7 @@ fn run() -> Result<(), Error> {
     let bin_home = env::var_os("XDG_BIN_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| home.join(".local/bin"));
-    let files = [
+    let mut files = vec![
         (
             workspace.join("target/release/nothing-linux"),
             bin_home.join("nothing-linux"),
@@ -62,6 +62,14 @@ fn run() -> Result<(), Error> {
             data_home.join(format!("icons/hicolor/scalable/apps/{APP_ID}.svg")),
         ),
     ];
+    for size in [48, 64, 128, 256] {
+        files.push((
+            workspace.join(format!(
+                "data/icons/hicolor/{size}x{size}/apps/{APP_ID}.png"
+            )),
+            data_home.join(format!("icons/hicolor/{size}x{size}/apps/{APP_ID}.png")),
+        ));
+    }
     match action.as_str() {
         "install-user" => {
             let status = Command::new("cargo")

@@ -91,6 +91,13 @@ pub(super) fn overview_page(
         .spacing(12)
         .css_classes(["hero-card"])
         .build();
+    hero.append(
+        &gtk::Label::builder()
+            .label("BATTERY LIFE")
+            .halign(gtk::Align::Start)
+            .css_classes(["caption", "dim-label"])
+            .build(),
+    );
     let batteries = gtk::Box::builder()
         .orientation(gtk::Orientation::Horizontal)
         .homogeneous(true)
@@ -104,12 +111,25 @@ pub(super) fn overview_page(
     batteries.append(&right);
     hero.append(&batteries);
     page.append(&hero);
+    let wear_card = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(8)
+        .css_classes(["tonal-card"])
+        .build();
+    wear_card.append(
+        &gtk::Label::builder()
+            .label("WEAR DETECTION")
+            .halign(gtk::Align::Start)
+            .css_classes(["heading"])
+            .build(),
+    );
     let wear = gtk::Label::builder()
         .label("Left: unknown  ·  Right: unknown")
         .halign(gtk::Align::Start)
         .css_classes(["dim-label"])
         .build();
-    page.append(&wear);
+    wear_card.append(&wear);
+    page.append(&wear_card);
     let quick = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
         .spacing(12)
@@ -234,6 +254,22 @@ impl SimpleEqState {
     }
 }
 
+const BALANCED_GAINS: [f32; 3] = [0.0, 0.0, 0.0];
+const MORE_BASS_GAINS: [f32; 3] = [4.0, 0.0, 0.0];
+const MORE_TREBLE_GAINS: [f32; 3] = [0.0, 0.0, 4.0];
+const VOICE_GAINS: [f32; 3] = [-1.5, 3.0, -1.5];
+
+fn simple_state_for_preset(preset: EqPreset, custom_gains: [f32; 3]) -> SimpleEqState {
+    let gains = match preset {
+        EqPreset::Balanced => BALANCED_GAINS,
+        EqPreset::MoreBass => MORE_BASS_GAINS,
+        EqPreset::MoreTreble => MORE_TREBLE_GAINS,
+        EqPreset::Voice => VOICE_GAINS,
+        EqPreset::Custom | EqPreset::Advanced => custom_gains,
+    };
+    SimpleEqState::from_gains(gains)
+}
+
 #[derive(Debug, Clone, PartialEq)]
 struct AdvancedUiState {
     name: String,
@@ -301,7 +337,7 @@ pub(super) struct EqualizerRefs {
 
 impl EqualizerRefs {
     pub(super) fn refresh(&self, snapshot: &DeviceSnapshot) {
-        let simple = SimpleEqState::from_gains(snapshot.custom_eq);
+        let simple = simple_state_for_preset(snapshot.eq_preset, snapshot.custom_eq);
         *self.simple_state.borrow_mut() = simple;
         set_simple_controls(simple, &self.simple_scales, &self.simple_graph);
 
@@ -2069,5 +2105,39 @@ fn format_gain(value: f32) -> String {
         format!("+{value:.1}")
     } else {
         format!("{value:.1}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn simple_presets_have_distinct_visual_curves() {
+        assert_eq!(
+            simple_state_for_preset(EqPreset::Balanced, [6.0, 6.0, 6.0]).gains,
+            BALANCED_GAINS
+        );
+        assert_eq!(
+            simple_state_for_preset(EqPreset::MoreBass, [0.0; 3]).gains,
+            MORE_BASS_GAINS
+        );
+        assert_eq!(
+            simple_state_for_preset(EqPreset::MoreTreble, [0.0; 3]).gains,
+            MORE_TREBLE_GAINS
+        );
+        assert_eq!(
+            simple_state_for_preset(EqPreset::Voice, [0.0; 3]).gains,
+            VOICE_GAINS
+        );
+    }
+
+    #[test]
+    fn custom_preset_uses_the_device_reported_gains() {
+        let custom = [-4.0, 1.5, 6.0];
+        assert_eq!(
+            simple_state_for_preset(EqPreset::Custom, custom).gains,
+            custom
+        );
     }
 }

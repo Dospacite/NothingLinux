@@ -357,6 +357,7 @@ pub fn build(
         .width_request(390)
         .height_request(560)
         .build();
+    crate::install_quit_shortcut(&window, app);
     window.set_resizable(false);
     let toolbar = adw::ToolbarView::new();
     let header = adw::HeaderBar::new();
@@ -374,7 +375,10 @@ pub fn build(
     status_box.append(&status);
     header.pack_start(&spinner_slot);
     header.pack_end(&status_box);
-    toolbar.add_top_bar(&header);
+    // A real titlebar gives Wayland compositors a draggable client-side
+    // decoration. Keeping this as ordinary ToolbarView content prevents
+    // Hyprland from receiving a normal move request for floating windows.
+    window.set_titlebar(Some(&header));
 
     let toast = adw::ToastOverlay::new();
     let layout = gtk::Box::new(gtk::Orientation::Vertical, 0);

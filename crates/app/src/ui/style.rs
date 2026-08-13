@@ -14,7 +14,7 @@ pub(super) fn install_css() {
 .battery-value { font-size: 16px; font-weight: 700; }
 .dot-title { letter-spacing: 2px; }
 .control-selected {
-  color: #e61a1f;
+  color: @window_fg_color;
   background: alpha(#e61a1f, .16);
   border-color: alpha(#e61a1f, .55);
 }
@@ -54,7 +54,7 @@ pub(super) fn install_css() {
   font-weight: 700;
 }
 .eq-preset-selected {
-  color: #e61a1f;
+  color: @window_fg_color;
   background: alpha(#e61a1f, .16);
   border-color: alpha(#e61a1f, .55);
 }

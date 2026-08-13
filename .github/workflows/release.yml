@@ -52,7 +52,8 @@ jobs:
             patchelf \
             ruby-dev \
             rpm \
-            file
+            file \
+            zsync
           sudo gem install fpm --version 1.15.1 --no-document
 
       - name: Resolve and validate version
@@ -88,6 +89,9 @@ jobs:
           rpm -qip dist/*.rpm
           file dist/*.AppImage
           test -x dist/*.AppImage
+          test -s dist/*.AppImage.zsync
+          readelf --string-dump=.upd_info dist/*.AppImage | grep -F \
+            'gh-releases-zsync|Dospacite|NothingLinux|latest|nothing-linux_*_amd64.AppImage.zsync'
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v7

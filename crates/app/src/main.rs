@@ -202,10 +202,30 @@ fn start_backend(events: mpsc::Sender<DeviceEvent>, commands: mpsc::Receiver<Dev
     std::thread::Builder::new().name("nothing-linux-worker".into()).spawn(move || {
         let runtime = match tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build() { Ok(runtime) => runtime, Err(error) => { tracing::error!(%error, "failed to create async runtime"); return; } };
         runtime.block_on(async move {
-            let _ = events.send(DeviceEvent::ConnectionChanged(
-                nothing_core::ConnectionState::Connecting,
-            ));
-            let session = match bluer_session().await { Ok(value) => value, Err(reason) => { let _ = events.send(DeviceEvent::CommandFailed { sequence: None, command: DeviceCommand::QueryBattery, reason }); return; } };
+            let mut last_discovery_error = None;
+            let session = loop {
+                let _ = events.send(DeviceEvent::ConnectionChanged(
+                    nothing_core::ConnectionState::Connecting,
+                ));
+                match bluer_session().await {
+                    Ok(session) => break session,
+                    Err(reason) => {
+                        tracing::warn!(%reason, "Nothing Ear discovery failed");
+                        if last_discovery_error.as_deref() != Some(reason.as_str()) {
+                            let _ = events.send(DeviceEvent::CommandFailed {
+                                sequence: None,
+                                command: DeviceCommand::QueryBattery,
+                                reason: reason.clone(),
+                            });
+                            last_discovery_error = Some(reason);
+                        }
+                        let _ = events.send(DeviceEvent::ConnectionChanged(
+                            nothing_core::ConnectionState::Disconnected,
+                        ));
+                        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                    }
+                }
+            };
             let mut controller = nothing_core::Controller::spawn_managed(session.device);
             loop {
                 tokio::select! {
@@ -248,15 +268,68 @@ fn install_close_behavior(
     config: Rc<RefCell<AppConfig>>,
     paths: Option<Paths>,
 ) {
+    let application = window.application();
     window.connect_close_request(move |window| {
-        if config.borrow().first_close_explained { window.set_visible(false); return glib::Propagation::Stop; }
-        let dialog = adw::MessageDialog::builder().transient_for(window).heading("Keep Nothing Linux running?").body("Background monitoring keeps battery and controls available. You can quit at any time with Ctrl+Q.").build();
-        dialog.add_responses(&[("keep", "Keep running"), ("quit", "Quit")]); dialog.set_default_response(Some("keep")); dialog.set_close_response("keep");
-        let weak_window = window.downgrade(); let config = config.clone(); let paths = paths.clone();
-        dialog.connect_response(None, move |dialog, response| {
-            if response == "quit" { if let Some(app) = dialog.application() { app.quit(); } return; }
-            config.borrow_mut().first_close_explained = true; if let Some(paths) = &paths { let _ = config.borrow().save(paths); }
-            if let Some(window) = weak_window.upgrade() { window.set_visible(false); }
-        }); dialog.present(); glib::Propagation::Stop
+        if config.borrow().first_close_explained {
+            window.set_visible(false);
+            return glib::Propagation::Stop;
+        }
+        let dialog = adw::MessageDialog::builder()
+            .transient_for(window)
+            .modal(true)
+            .heading("Keep Nothing Linux running?")
+            .body("Background monitoring keeps battery and controls available. You can quit at any time with Ctrl+Q.")
+            .build();
+        dialog.add_responses(&[("keep", "Keep running"), ("quit", "Quit")]);
+        dialog.set_default_response(Some("keep"));
+        dialog.set_close_response("keep");
+        if let Some(application) = &application {
+            install_quit_shortcut(&dialog, application);
+        }
+        let weak_window = window.downgrade();
+        let config = config.clone();
+        let paths = paths.clone();
+        let application = application.clone();
+        dialog.connect_response(None, move |_dialog, response| {
+            if response == "quit" {
+                // MessageDialog does not reliably inherit the GtkApplication
+                // through a transient parent on every Wayland compositor.
+                // Use the parent application's handle captured above instead.
+                if let Some(application) = &application {
+                    application.quit();
+                }
+                return;
+            }
+            config.borrow_mut().first_close_explained = true;
+            if let Some(paths) = &paths {
+                let _ = config.borrow().save(paths);
+            }
+            if let Some(window) = weak_window.upgrade() {
+                window.set_visible(false);
+            }
+        });
+        dialog.present();
+        glib::Propagation::Stop
     });
+}
+
+fn install_quit_shortcut(widget: &impl IsA<gtk::Widget>, application: &impl IsA<gtk::Application>) {
+    let application = application.downgrade();
+    let controller = gtk::ShortcutController::new();
+    controller.set_scope(gtk::ShortcutScope::Global);
+    controller.add_shortcut(gtk::Shortcut::new(
+        Some(gtk::KeyvalTrigger::new(
+            gtk::gdk::Key::q,
+            gtk::gdk::ModifierType::CONTROL_MASK,
+        )),
+        Some(gtk::CallbackAction::new(move |_, _| {
+            if let Some(application) = application.upgrade() {
+                application.upcast_ref::<gtk::Application>().quit();
+                glib::Propagation::Stop
+            } else {
+                glib::Propagation::Proceed
+            }
+        })),
+    ));
+    widget.add_controller(controller);
 }

@@ -15,6 +15,7 @@ struct Pending {
 }
 
 const WEAR_POLL_INTERVAL: Duration = Duration::from_millis(750);
+const BATTERY_POLL_INTERVAL: Duration = Duration::from_secs(30);
 
 pub async fn run_session<T: FrameTransport>(
     transport: &mut T,
@@ -41,6 +42,7 @@ pub async fn run_session<T: FrameTransport>(
     send_raw(transport, command::QUERY_PROTOCOL, &[], &mut sequence).await?;
     let mut timeout_tick = interval(Duration::from_millis(50));
     let mut wear_poll = interval(WEAR_POLL_INTERVAL);
+    let mut battery_poll = interval(BATTERY_POLL_INTERVAL);
     let mut buffer = [0_u8; 1024];
 
     loop {
@@ -261,6 +263,9 @@ pub async fn run_session<T: FrameTransport>(
             }
             _ = wear_poll.tick(), if supported => {
                 send_command(transport, &DeviceCommand::QueryWear, &mut sequence).await?;
+            }
+            _ = battery_poll.tick(), if supported => {
+                send_command(transport, &DeviceCommand::QueryBattery, &mut sequence).await?;
             }
         }
     }

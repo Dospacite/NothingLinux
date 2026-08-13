@@ -3,6 +3,7 @@ set -euo pipefail
 
 readonly APP_ID="io.github.nothinglinux.nothinglinux"
 readonly PACKAGE_NAME="nothing-linux"
+readonly APPIMAGE_UPDATE_INFORMATION="gh-releases-zsync|Dospacite|NothingLinux|latest|nothing-linux_*_amd64.AppImage.zsync"
 readonly LINUXDEPLOY_VERSION="1-alpha-20251107-1"
 readonly GTK_PLUGIN_COMMIT="3b67a1d1c1b0c8268f57f2bce40fe2d33d409cea"
 
@@ -24,7 +25,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-for command in curl fpm; do
+for command in curl fpm zsyncmake; do
     command -v "$command" >/dev/null || {
         printf 'required command not found: %s\n' "$command" >&2
         exit 1
@@ -55,6 +56,10 @@ mkdir -p \
     "$PACKAGE_ROOT/usr/bin" \
     "$PACKAGE_ROOT/usr/share/applications" \
     "$PACKAGE_ROOT/usr/share/icons/hicolor/scalable/apps" \
+    "$PACKAGE_ROOT/usr/share/icons/hicolor/48x48/apps" \
+    "$PACKAGE_ROOT/usr/share/icons/hicolor/64x64/apps" \
+    "$PACKAGE_ROOT/usr/share/icons/hicolor/128x128/apps" \
+    "$PACKAGE_ROOT/usr/share/icons/hicolor/256x256/apps" \
     "$PACKAGE_ROOT/usr/share/metainfo" \
     "$TOOLS_DIR"
 
@@ -68,6 +73,11 @@ install -m 0644 \
 install -m 0644 \
     "$WORKSPACE/data/icons/$APP_ID.svg" \
     "$PACKAGE_ROOT/usr/share/icons/hicolor/scalable/apps/$APP_ID.svg"
+for icon_size in 48 64 128 256; do
+    install -m 0644 \
+        "$WORKSPACE/data/icons/hicolor/${icon_size}x${icon_size}/apps/$APP_ID.png" \
+        "$PACKAGE_ROOT/usr/share/icons/hicolor/${icon_size}x${icon_size}/apps/$APP_ID.png"
+done
 
 common_fpm_args=(
     --input-type dir
@@ -107,6 +117,10 @@ export APPIMAGE_EXTRACT_AND_RUN=1
 export DEPLOY_GTK_VERSION=4
 export LINUXDEPLOY_PLUGIN_GTK="$GTK_PLUGIN"
 export OUTPUT="$DIST/${PACKAGE_NAME}_${VERSION}_${DEB_ARCH}.AppImage"
+# Keep the update channel with the release assets themselves. linuxdeploy
+# passes this to appimagetool, which embeds it in the AppImage and writes the
+# matching zsync control file next to the generated artifact.
+export UPDATE_INFORMATION="$APPIMAGE_UPDATE_INFORMATION"
 
 "$LINUXDEPLOY" \
     --appdir "$PACKAGE_ROOT" \
@@ -117,6 +131,10 @@ export OUTPUT="$DIST/${PACKAGE_NAME}_${VERSION}_${DEB_ARCH}.AppImage"
     --output appimage
 
 chmod +x "$OUTPUT"
+[[ -s "$OUTPUT.zsync" ]] || {
+    printf 'AppImage update metadata was not generated: %s\n' "$OUTPUT.zsync" >&2
+    exit 1
+}
 
 fpm "${common_fpm_args[@]}" \
     --output-type rpm \

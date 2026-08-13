@@ -24,6 +24,10 @@ chmod +x nothing-linux_*_amd64.AppImage
 ./nothing-linux_*_amd64.AppImage
 ```
 
+When managed by Gear Lever, released AppImages discover newer GitHub Releases
+automatically. Each release includes the matching `.zsync` metadata so updates
+reuse unchanged data instead of downloading the whole AppImage.
+
 ### Fedora
 
 Download the latest `nothing-linux-VERSION-1.x86_64.rpm` from the [Releases page](https://github.com/Dospacite/NothingLinux/releases), then install it with:
@@ -50,10 +54,12 @@ The source installer places the application under `~/.local` for the current use
 
 ## First Use
 
-1. Pair and connect the earbuds from the desktop Bluetooth settings.
+1. Pair the earbuds from the desktop Bluetooth settings. They must show as **Paired**, not merely as a nearby device.
 2. Put at least one earbud outside the case.
-3. Open Nothing Linux. It discovers the paired B171 device automatically and shows **Connected** when synchronization finishes.
+3. Open Nothing Linux. It scans for the paired B171 device automatically, reconnects after pairing, and shows **Connected** when synchronization finishes.
 4. Use the navigation bar to open Overview, Noise Control, Equalizer, Controls, and More.
+
+If Nothing Linux reports that an Ear is nearby but unpaired, complete pairing in the desktop Bluetooth settings, then leave the app open; it retries automatically.
 
 Closing the window can leave Nothing Linux running in the system tray for battery monitoring and quick ANC controls. Use **Quit** from the tray or press `Ctrl+Q` to stop it. **Start at login** is available on the More screen.
 
